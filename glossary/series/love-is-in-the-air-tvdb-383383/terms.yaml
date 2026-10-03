@@ -1,0 +1,22 @@
+# Series glossary: fixed translations / do-not-translate terms for this series.
+# verified: true = taken from a source above; false = from general knowledge, reviewer to confirm.
+# Matching must be suffix-aware: Turkish suffixes attach after an apostrophe (Serkan'ın, Eda'ya).
+terms:
+  - {tr: Sen Çal Kapımı, en: Love Is in the Air, policy: translate, note: "Title. TVDB English alias: 'You Knock on My Door'.", verified: true}
+  - {tr: burs, en: scholarship, policy: translate, note: "Central plot device (Eda's international education scholarship).", verified: true}
+  - {tr: sahte nişanlı, en: fake fiancée, policy: translate, note: "Eda poses as Serkan's fiancée for two months. Gender is not marked in Turkish; use context.", verified: true}
+  - {tr: sahte nişan, en: fake engagement, policy: translate, verified: true}
+  - {tr: Bolat, en: Bolat, policy: keep, note: "Family surname (Serkan, Aydan, Alptekin).", verified: true}
+  - {tr: Art Life, en: Art Life, policy: keep, note: "Company name in the show, believed to be Serkan's architecture firm.", verified: false}
+# Explicit, reviewable fixes for recurring Whisper misspellings of names (whole-word, case-sensitive,
+# apostrophe suffixes preserved). Deliberately NOT fuzzy: Selim/Kerim are real different names.
+asr_corrections:
+  - {heard: Sarkan, correct: Serkan, note: "seen in S01E01 (3 cues)"}
+  - {heard: Bulat, correct: Bolat, note: "seen in S01E01 ('Serkan Bolat')"}
+  - {heard: Selkan, correct: Serkan, note: "2x in S01E01-05; not a Turkish name"}
+  - {heard: Volat, correct: Bolat, note: "2x in S01E01-05"}
+  - {heard: Tırıl, correct: Pırıl, note: "2x in S01E01-05; not a word"}
+# Review candidates NOT applied (could be real words/names): Meyla~Leyla, Fırıl~Pırıl ("fırıl fırıl"),
+# Tarkan~Serkan (real singer name), Berkay~Serkan (real name), Balat (Istanbul district).
+# Names heard in episodes that are not in the cast databases (add as discovered):
+episodic_names: []

@@ -1,0 +1,50 @@
+# Series glossary: characters. Names/actors/episode counts come from TMDB, TVDB, TVmaze and the local nfo.
+# gender: inferred from the given name only (Turkish "o" has no gender), reviewed: false until a person
+# confirms it. Relationships are deliberately left empty except what the synopsis states.
+# role: lead | main | recurring | guest.  episodes: TMDB count (52 total across 2 seasons).
+# aliases: spoken forms (first names, nicknames, with honorifics) used for ASR priming and name matching.
+characters:
+  - {name: Eda Yıldız, aliases: [Eda, Eda Hanım, Eda Bolat], actor: Hande Erçel, gender: female, role: lead, episodes: 52, reviewed: false,
+     note: "Lead. Student whose scholarship is cut; agrees to pose as Serkan's fiancée. 'Eda Bolat' is used in-story (fake engagement)."}
+  - {name: Serkan Bolat, aliases: [Serkan, Serkan Bey], actor: Kerem Bürsin, gender: male, role: lead, episodes: 52, reviewed: false,
+     note: "Lead. Cuts Eda's scholarship, then offers it back for a fake engagement."}
+  - {name: Ayfer Yıldız, aliases: [Ayfer], actor: Evrim Doğan, gender: female, role: main, episodes: 52, reviewed: false}
+  - {name: Engin Sezgin, aliases: [Engin], actor: Anıl İlter, gender: male, role: main, episodes: 52, reviewed: false}
+  - {name: Melek Yücel, aliases: [Melo, Melek], actor: Elçin Afacan, gender: female, role: main, episodes: 52, reviewed: false,
+     note: "Nickname 'Melo' (TVmaze, TMDB)."}
+  - {name: Pırıl Baytekin, aliases: [Pırıl], actor: Başak Gümülcinelioğlu, gender: female, role: main, episodes: 52, reviewed: false}
+  - {name: Seyfi Çiçek, aliases: [Seyfi], actor: Alican Aytekin, gender: male, role: main, episodes: 52, reviewed: false}
+  - {name: Erdem Şangay, aliases: [Erdem], actor: Sarp Bozkurt, gender: male, role: main, episodes: 52, reviewed: false}
+  - {name: Aydan Bolat, aliases: [Aydan, Aydan Hanım], actor: Neslihan Yeldan, gender: female, role: main, episodes: 52, reviewed: false}
+  - {name: Ferit Şimşek, aliases: [Ferit], actor: Çağrı Çıtanak, gender: male, role: main, episodes: 39, reviewed: false}
+  - {name: Ceren Başar, aliases: [Ceren], actor: Melisa Döngel, gender: female, role: main, episodes: 39, reviewed: false}
+  - {name: Leyla Haktan, aliases: [Leyla], actor: İlkyaz Arslan, gender: female, role: main, episodes: 39, reviewed: false,
+     note: "Surname 'Haktan' from TMDB; TVDB/nfo list just 'Leyla'."}
+  - {name: Selin Atakan, aliases: [Selin], actor: Bige Önal, gender: female, role: main, episodes: 32, reviewed: false}
+  - {name: Figen Yıldırım, aliases: [Figen, Fifi], actor: Sitare Akbaş, gender: female, role: recurring, episodes: 28, reviewed: false,
+     note: "Nickname 'Fifi' (TMDB)."}
+  - {name: Alptekin Bolat, aliases: [Alptekin], actor: Ahmet Mark Somers, gender: male, role: recurring, episodes: 20, reviewed: false}
+  - {name: Kemal Özcan, aliases: [Kemal], actor: Sinan Albayrak, gender: male, role: recurring, episodes: 18, reviewed: false}
+  - {name: Burak, aliases: [Burak], actor: Sinan Helvacı, gender: male, role: recurring, episodes: 13, reviewed: false}
+  - {name: Kerem, aliases: [Kerem], actor: Sina Özer, gender: male, role: recurring, episodes: 13, reviewed: false}
+  - {name: Kiraz, aliases: [Kiraz], actor: Maya Başol, gender: unknown, role: recurring, episodes: 13, reviewed: false}
+  - {name: Can, aliases: [Can], actor: Ahmet Efe Metekoğlu, gender: male, role: recurring, episodes: 13, reviewed: false,
+     note: "TMDB also lists a second 'Can' (Erdem Yılmaz, 1 episode)."}
+  - {name: Pina, aliases: [Pina], actor: Doğa Özüm, gender: unknown, role: recurring, episodes: 10, reviewed: false}
+  - {name: Alexander Zucco, aliases: [Şef Alexander, Chef Alexander, Zucco], actor: Hakan Karahan, gender: male, role: recurring, episodes: 10, reviewed: false,
+     note: "Chef. Credited 'Şef Alexander Zucco' (TVmaze), 'Chef Alexander Zucco' (TMDB)."}
+  - {name: Kaan Karadağ, aliases: [Kaan], actor: İsmail Ege Şaşmaz, gender: male, role: recurring, episodes: 9, reviewed: false,
+     note: "TVmaze/TMDB spell 'Karadag' without ğ; TVDB/nfo use 'Karadağ'."}
+  - {name: Efe Akman, aliases: [Efe], actor: Ali Ersan Duru, gender: male, role: recurring, episodes: 9, reviewed: false}
+  - {name: Deniz Karsu, aliases: [Deniz], actor: Sarp Can Köroğlu, gender: unknown, role: recurring, episodes: 9, reviewed: false}
+  - {name: Deniz, aliases: [Deniz], actor: Ayşe Akın, gender: unknown, role: recurring, episodes: 9, reviewed: false,
+     note: "Second character named Deniz; disambiguate from Deniz Karsu by context."}
+  - {name: Balca Koçak, aliases: [Balca], actor: İlayda Çevik, gender: female, role: recurring, episodes: 7, reviewed: false}
+  - {name: Semiha Yıldırım, aliases: [Semiha], actor: Ayşegül İşsever, gender: female, role: guest, episodes: 6, reviewed: false}
+  - {name: Tahir, aliases: [Tahir], actor: Buğrahan Çayır, gender: male, role: guest, episodes: 5, reviewed: false}
+  - {name: Fatma, aliases: [Fatma], actor: Ceren İncelen, gender: female, role: guest, episodes: 5, reviewed: false}
+  - {name: Fikret, aliases: [Fikret], actor: Volkan Ünal, gender: male, role: guest, episodes: 3, reviewed: false}
+  - {name: Ateş, aliases: [Ateş], actor: Özhan Carda, gender: male, role: guest, episodes: 3, reviewed: false}
+  - {name: Sevil, aliases: [Sevil], actor: Aylin Kabasakal, gender: female, role: guest, episodes: 1, reviewed: false}
+  - {name: Püren, aliases: [Püren], actor: Pelin Uluksar, gender: female, role: guest, episodes: 1, reviewed: false}
+  - {name: Emre, aliases: [Emre], actor: İbrahim Şentürk, gender: male, role: guest, episodes: 1, reviewed: false}

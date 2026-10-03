@@ -3,9 +3,9 @@
 How AI coding agents should work in this repo. Read `CLAUDE.md` first, then this file, then the doc relevant to your task.
 
 ## 1. Read Order
-1. `product-requirements.md` — what and why
-2. `architecture.md` — pipeline, modules, data model
-3. `design-system.md` — only for `web/` work
+1. `docs/product-requirements.md` — what and why
+2. `docs/architecture.md` — pipeline, modules, data model
+3. `docs/design-system.md` — only for `web/` work
 
 ## 2. Working Agreements
 - Make the smallest change that satisfies the task. No drive-by refactors.
@@ -52,9 +52,8 @@ Use tokens from `design-system.md`; no hard-coded colors. Every interactive elem
 
 ## 5. Quality Gates (must pass before finishing)
 ```
-uv run ruff check . && uv run ruff format --check .
-uv run mypy src
-uv run pytest -q
+docker compose -f docker/compose.yaml run --rm --entrypoint pytest subai -q
+# ruff / mypy: to be added to requirements/dev.txt
 ```
 Frontend (if touched): `pnpm lint && pnpm typecheck && pnpm test`.
 
@@ -65,7 +64,7 @@ Frontend (if touched): `pnpm lint && pnpm typecheck && pnpm test`.
 - Keep everything local; nothing (media, text, logs) may leave the machine.
 
 **Don't**
-- Don't commit media, models, `data/`, or tokens.
+- Don't commit media, models, `workspace/`, or tokens.
 - Don't merge or split cues inside Translate; that belongs to Format.
 - Don't "fix" ASR text silently in Translate — flag instead.
 - Don't add features outside `product-requirements.md` without confirmation.
@@ -78,9 +77,7 @@ Frontend (if touched): `pnpm lint && pnpm typecheck && pnpm test`.
 
 ## 8. Useful Commands
 ```
-uv run subai run ep01.mkv --series demo --target en
-uv run subai stage asr ep01 --force
-uv run subai export ep01 --fmt srt
-uv run python eval/wer.py data/eval/clean
-pnpm --dir web dev
+./scripts/subai run -i /input/ep01.mkv
+./scripts/subai run -i /input/ep01.mkv --overwrite
+python eval/wer.py workspace/eval/clean
 ```

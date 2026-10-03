@@ -1,0 +1,130 @@
+# Language glossary: Turkish (tr) -> target languages. Series-independent.
+# Each entry: tr (headword, lowercase), en (default English), policy, note.
+# policy: translate | keep | by_context | drop
+#   keep        = leave the Turkish word (e.g. "Bey", "Hanım" after a name)
+#   by_context  = the note says how to choose
+# Matching is suffix-aware and Turkish-locale aware (İ/i, I/ı). To add a language, add a key (ms:, id:) per entry.
+# status: reviewed=false means written from general knowledge; a Turkish speaker should confirm.
+language: tr
+version: 1
+reviewed: false
+
+grammar_notes:
+  - "Pronoun 'o' has no gender: choose he/she/it from the speaker, the character sheet or context. Flag gender_ambiguous when unsure."
+  - "'sen' (informal you) vs 'siz' (formal or plural you): English has no distinction; carry the register through word choice or an address term, not literally."
+  - "Verb-final word order: translate whole sentences, not cue by cue."
+  - "Evidential '-miş' (heard/inferred, not witnessed): often 'apparently', 'I heard', 'seems'."
+  - "Question particle 'mi/mı/mu/mü' and tag 'değil mi' ('right?', 'isn't it?')."
+  - "Suffixes follow names after an apostrophe: Serkan'ın, Eda'ya, Ayşe'nin. Match the stem."
+  - "Discourse particles 'ya', 'yani', 'işte', 'hani', 'ki': often drop or render as tone ('come on', 'you know')."
+  - "Vocative / affection often attaches to names: 'Edacığım', 'Serkancığım' (diminutive -cık: darling, dear Eda)."
+
+address_terms:
+  - {tr: abi, en: "bro / big brother", policy: by_context, note: "Respectful address to an older man or friend. Keep 'Abi' after a name (Ahmet Abi) in honorific=keep series; otherwise 'man', 'bro', or omit."}
+  - {tr: abla, en: "sis / big sister", policy: by_context, note: "Respectful address to an older woman. 'Ayşe Abla' keep; bare 'abla' = 'sis' or omit."}
+  - {tr: ağabey, en: "big brother", policy: by_context, note: "Formal form of abi."}
+  - {tr: bey, en: "Mr.", policy: keep, note: "After first name: 'Serkan Bey' = 'Mr. Serkan' (polite, not surname). Keep as 'Serkan Bey' or 'Mr. Bolat' per series policy."}
+  - {tr: hanım, en: "Ms. / Mrs.", policy: keep, note: "After first name: 'Peri Hanım'. Also 'hanımefendi' = madam, ma'am."}
+  - {tr: hanımefendi, en: "madam / ma'am", policy: translate}
+  - {tr: beyefendi, en: "sir", policy: translate}
+  - {tr: efendim, en: "yes? / pardon? / sir / ma'am", policy: by_context, note: "Reply when addressed ('Yes?'), request to repeat ('Pardon?'), or politeness marker ('sir/ma'am'). Never literal 'my lord'."}
+  - {tr: hocam, en: "teacher / boss / my friend", policy: by_context, note: "Addressed to a teacher or respected person; casual 'man' among peers."}
+  - {tr: kardeşim, en: "my friend / bro / sis / my dear", policy: by_context, note: "Literal 'my sibling'; used for anyone younger or equal. Not necessarily a relative."}
+  - {tr: canım, en: "dear / honey", policy: translate, note: "Endearment, also used between friends."}
+  - {tr: tatlım, en: "sweetie / sweetheart", policy: translate}
+  - {tr: aşkım, en: "my love", policy: translate}
+  - {tr: hayatım, en: "darling / my life", policy: translate}
+  - {tr: güzelim, en: "beautiful / my dear", policy: translate}
+  - {tr: yenge, en: "sister-in-law / friend's wife", policy: by_context, note: "Respectful address to the wife of an older male relative or friend."}
+  - {tr: amca, en: "uncle / sir", policy: by_context, note: "Paternal uncle; also respectful address to an older man."}
+  - {tr: teyze, en: "aunt / ma'am", policy: by_context, note: "Maternal aunt; also respectful address to an older woman."}
+  - {tr: dayı, en: "uncle (mother's brother)", policy: by_context}
+  - {tr: hala, en: "aunt (father's sister)", policy: by_context, note: "Homograph of the adverb 'hâlâ' (still). Context decides."}
+  - {tr: anneanne, en: "grandma (mother's mother)", policy: translate}
+  - {tr: babaanne, en: "grandma (father's mother)", policy: translate}
+  - {tr: dede, en: "grandpa", policy: translate}
+  - {tr: kızım, en: "my girl / my daughter", policy: by_context, note: "Often an affectionate address, not literal."}
+  - {tr: oğlum, en: "son / my boy", policy: by_context, note: "Affectionate or scolding address; also 'man' / 'dude' between peers."}
+  - {tr: usta, en: "master / boss", policy: by_context, note: "Address to a craftsman or skilled worker."}
+  - {tr: şef, en: "chef / boss", policy: by_context}
+  - {tr: patron, en: "boss", policy: translate}
+  - {tr: müdür, en: "manager / director", policy: translate}
+  - {tr: sayın, en: "dear (formal) / esteemed", policy: translate}
+
+formulae:
+  - {tr: maşallah, en: "wow / bless them / that's wonderful", policy: by_context, note: "Admiration, also protects from the evil eye. Not literally 'God has willed it'."}
+  - {tr: inşallah, en: "hopefully / God willing", policy: by_context, note: "Often just 'hopefully'."}
+  - {tr: allah allah, en: "good grief / what on earth / oh my", policy: by_context, note: "Surprise or exasperation. Never literal."}
+  - {tr: vallahi, en: "I swear", policy: translate}
+  - {tr: allah'ım, en: "oh my God", policy: translate}
+  - {tr: allah kahretsin, en: "damn it", policy: translate}
+  - {tr: geçmiş olsun, en: "get well soon / sorry for what happened", policy: by_context, note: "After illness, accident or bad news."}
+  - {tr: kolay gelsin, en: "hope work goes easy / good luck with the work", policy: by_context, note: "Greeting to someone working. Often 'Hello' when entering a shop or office."}
+  - {tr: afiyet olsun, en: "enjoy your meal / bon appétit", policy: translate}
+  - {tr: hayırlı olsun, en: "congratulations / best wishes", policy: by_context, note: "New job, home, engagement, purchase."}
+  - {tr: hoş geldiniz, en: "welcome", policy: translate}
+  - {tr: hoş bulduk, en: "thank you / glad to be here", policy: by_context, note: "Standard reply to 'hoş geldiniz'."}
+  - {tr: sağ ol, en: "thanks", policy: translate, note: "Informal; formal 'sağ olun'."}
+  - {tr: eyvallah, en: "thanks / OK, bye / respect", policy: by_context}
+  - {tr: teşekkür ederim, en: "thank you", policy: translate}
+  - {tr: rica ederim, en: "you're welcome / please", policy: by_context}
+  - {tr: buyurun, en: "here you are / please / go ahead / yes?", policy: by_context, note: "Offer, invitation, or 'how can I help?'."}
+  - {tr: bir şey değil, en: "it's nothing / you're welcome", policy: translate}
+  - {tr: estağfurullah, en: "not at all / don't mention it", policy: by_context, note: "Humble reply to a compliment or thanks."}
+  - {tr: başın sağ olsun, en: "my condolences", policy: translate}
+  - {tr: allah rahmet eylesin, en: "may he/she rest in peace", policy: by_context, note: "Gender not marked."}
+  - {tr: çok yaşa, en: "bless you", policy: translate, note: "After a sneeze."}
+  - {tr: sıhhatler olsun, en: "to your health / enjoy", policy: by_context, note: "After a bath or haircut."}
+  - {tr: elinize sağlık, en: "thank you for the meal (bless your hands)", policy: by_context, note: "Compliment to the cook or maker."}
+  - {tr: allah razı olsun, en: "God bless you / thank you so much", policy: by_context}
+  - {tr: gözün aydın, en: "congratulations (on good news)", policy: by_context}
+  - {tr: güle güle, en: "goodbye / enjoy it", policy: by_context, note: "Goodbye, or 'enjoy' for a new purchase ('güle güle kullan')."}
+  - {tr: iyi akşamlar, en: "good evening", policy: translate}
+  - {tr: görüşürüz, en: "see you", policy: translate}
+
+idioms_and_phrases:
+  - {tr: ne alaka, en: "what does that have to do with it?", policy: translate}
+  - {tr: boş ver, en: "never mind / forget it", policy: translate}
+  - {tr: kafayı yemek, en: "to lose it / go crazy", policy: translate, note: "Literal 'to eat the head'."}
+  - {tr: baş göz etmek, en: "to marry off", policy: translate}
+  - {tr: göz koymak, en: "to have one's eye on", policy: translate}
+  - {tr: yüzüne gözüne bulaştırmak, en: "to mess up / botch", policy: translate}
+  - {tr: pot kırmak, en: "to put one's foot in it / make a gaffe", policy: translate}
+  - {tr: aman, en: "oh please / careful / for goodness' sake", policy: by_context, note: "Interjection: warning, plea or annoyance."}
+  - {tr: hadi, en: "come on / let's go / OK", policy: by_context}
+  - {tr: yahu, en: "come on / man / for heaven's sake", policy: by_context, note: "Particle of mild exasperation; often omit."}
+  - {tr: ulan, en: "dude / damn / hey", policy: by_context, note: "Rude-to-casual register depending on speaker; preserve register, e.g. 'dammit', 'man'."}
+  - {tr: lan, en: "man / damn", policy: by_context, note: "Shortened 'ulan'."}
+  - {tr: yani, en: "I mean / like / well", policy: by_context, note: "Filler; often drop."}
+  - {tr: valla, en: "really / I swear", policy: by_context, note: "Colloquial 'vallahi'."}
+  - {tr: hani, en: "you know / where is / remember", policy: by_context}
+  - {tr: şey, en: "um / thing", policy: by_context, note: "Hesitation filler 'um/uh', or the noun 'thing'."}
+
+# Natural spoken-tone punctuation (src/subai/pipeline/style.py). Learned from the human Turkish
+# subtitles of S01E01-04 and validated on held-out S01E05:
+#   continuation dots  precision 91% / recall 92%   |   interjection "!"  precision 92% / recall 28%
+# Commas were tested and rejected (precision <= 52%). Edit the list to taste; disable with --no-tone.
+tone:
+  continuation_dots: true
+  continuation_max_gap: 1.5      # seconds between cues that still counts as one running sentence
+  # NOTE: quote words YAML reads as booleans ("off", "on", "no", "yes"), or they silently become True/False.
+  exclamation_interjections: [aa, aaa, hişt, of, "off", ay, ayy, ah, bravo, allah]
+
+# Phantom phrases Whisper invents on silence, music and credits (learned from subtitle credits and
+# video outros). A cue is dropped only if its WHOLE text matches (lowercased, punctuation removed).
+# Seen in S01E01-05: "Altyazı M.K." (4 of 5 episodes), "İzlediğiniz için teşekkür ederim" (no-VAD probe).
+asr_hallucinations:
+  - 'altyaz[ıi]( m ?k)?'
+  - 'altyaz[ıi] .+'
+  - 'abone ol.*'
+  - 'izlediğiniz için teşekkür.*'
+  - 'iyi seyirler'
+  - 'bir sonraki videoda.*'
+  - 'videoyu beğenmeyi unutmayın'
+
+# Words Whisper tends to mishear in Turkish dialogue; used to review ASR errors, not to auto-correct.
+asr_watchlist:
+  - {heard: persepsiyon, likely: resepsiyon, note: "reception desk; seen with default VAD settings"}
+  - {heard: söremeyecektim, likely: "göremeyecektim / gösteremeyecektim / söylemeyecektim", note: "unstable across decoding settings; review manually"}
+  - {heard: hâlâ, likely: "hala", note: "same word, caret spelling varies; normalize to 'hâlâ' (still) vs 'hala' (aunt) by context"}
+  - {heard: "tatlın / tatlı / tatlım", likely: "tatlım (sweetie) vs tatlı (dessert/sweet)", note: "context decides"}

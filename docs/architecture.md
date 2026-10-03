@@ -31,7 +31,7 @@ video/audio
 ## 2. Tech Stack
 | Layer | Choice | Reason |
 |---|---|---|
-| Language | Python 3.11 | ML ecosystem |
+| Language | Python 3.12 (Ubuntu 24.04 image) | ML ecosystem |
 | ASR | faster-whisper (CTranslate2), Whisper large-v3 | Best open Turkish accuracy/speed |
 | Alignment | WhisperX / wav2vec2 | Accurate word timings |
 | VAD | Silero VAD | Cuts hallucination |
@@ -41,32 +41,28 @@ video/audio
 | Jobs | RQ + Redis (or in-process for CLI) | Simple resumable queue |
 | DB | SQLite (SQLAlchemy) → Postgres optional | Local-first |
 | Frontend | React + TypeScript + Vite, wavesurfer.js | Waveform editing |
-| Packaging | uv (lockfile), native install, no Docker | Reproducible, direct GPU access |
+| Packaging | Docker (CUDA 12 + cuDNN 9 base image), compose; Python deps pinned in image | Reproducible, no host dependency drift |
 
 ## 3. Repository Layout
 ```
 subtitle-ai-turkish/
-├── CLAUDE.md  agent-guide.md  architecture.md  design-system.md  product-requirements.md
-├── pyproject.toml
+├── README.md  LICENSE  CLAUDE.md
+├── docs/                       # product-requirements, architecture, design-system, agent-guide
+├── docker/                     # Dockerfile, compose.yaml
+├── scripts/subai               # runs the CLI inside Docker
+├── requirements/               # base.txt (runtime), dev.txt (tests)
 ├── src/subai/
-│   ├── cli.py                  # Typer entrypoint
-│   ├── config.py               # pydantic-settings
-│   ├── pipeline/
-│   │   ├── runner.py           # stage orchestration + caching
-│   │   ├── ingest.py  preprocess.py  asr.py  align.py  diarize.py
-│   │   ├── segment.py  translate/  format.py  export.py
-│   ├── translate/
-│   │   ├── base.py             # Translator protocol
-│   │   ├── ollama.py  llamacpp.py  nllb.py   # all local
-│   │   ├── prompts/            # versioned prompt templates
-│   │   └── glossary.py
-│   ├── models.py               # pydantic domain models
-│   ├── storage.py              # artifact store, content hashing
-│   └── api/                    # FastAPI routers
-├── web/                        # React review editor
+│   ├── __main__.py  cli.py     # Typer entrypoint (run, doctor, download-model)
+│   ├── api.py                  # FastAPI wrapper (planned)
+│   ├── logs.py  doctor.py  models.py
+│   ├── pipeline/               # implemented: audio, transcribe, segmenter, srtio, runner
+│   │                           # planned: align, diarize, format, export
+│   └── translate/              # planned: base, ollama, llamacpp, nllb, prompts/, glossary
 ├── tests/                      # unit, golden, e2e
-├── data/                       # gitignored: media, artifacts
-└── eval/                       # WER, readability, translation eval sets
+├── web/                        # React review editor (planned)
+├── eval/                       # WER, readability, translation eval sets (planned)
+└── workspace/                  # gitignored local I/O: input/ output/ logs/ artifacts/
+                                # (media library lives at /data on the host, read-only)
 ```
 
 ## 4. Domain Model
@@ -79,13 +75,14 @@ subtitle-ai-turkish/
 - **Job / StageRun** (stage, input_hash, output_path, model_versions, duration)
 
 ## 5. Artifact Store & Caching
-`data/episodes/<id>/<stage>/<input_hash>/…`
+`workspace/artifacts/<id>/<stage>/<input_hash>/…`
 Cache key = hash(stage input + stage config + model/prompt version). Re-running with unchanged inputs is a no-op. Editing glossary invalidates only translate → export.
 
 ## 6. Key Stage Designs
 
 ### ASR
 - 30 s chunks driven by VAD boundaries, `condition_on_previous_text=False` (limits looping), beam 5, temperature fallback.
+- VAD (Silero via faster-whisper): `threshold 0.3, min_silence 300 ms, speech_pad 400 ms` (library default 0.5 clipped short utterances and caused errors like *persepsiyona* for *resepsiyona*).
 - Filters: drop segments with high `no_speech_prob`, repeated n-grams, or compression ratio > 2.4.
 - Optional initial prompt with series character names to bias spelling.
 
@@ -119,8 +116,8 @@ WS   /episodes/{id}/progress
 Single-page editor: media player + waveform, virtualized cue table, side-by-side TR/target, flagged-queue filter, shortcut-driven. See `design-system.md`.
 
 ## 9. Deployment
-- Dev: `uv run subai …` and `pnpm dev`.
-- GPU: native install, no Docker. Python deps via `uv sync` (pinned CUDA-enabled wheels), system ffmpeg, Ollama as a native service. Models cached under `~/.cache` / `data/models`.
+- Run: `./scripts/subai <command>` (wraps `docker compose -f docker/compose.yaml run --rm subai`).
+- Docker + NVIDIA Container Toolkit. `docker/compose.yaml` services: `subai` (CLI/batch, run on demand) and `api` (FastAPI on 127.0.0.1). Mounts: media library read-only (`/data`), `./workspace` for input/output/logs, a named volume for the model cache. Host-side Ollama (optional, for LLM translation) is reached over the host network, never the internet.
 - No inbound network exposure by default (binds 127.0.0.1).
 
 ## 10. Security & Privacy
@@ -143,3 +140,22 @@ Single-page editor: media player + waveform, virtualized cue table, side-by-side
 | 5 | No cloud dependencies | Privacy and offline use are requirements |
 | 3 | 1:1 segment translation, merge later | Keeps timing traceable |
 | 4 | SQLite + files | Local-first simplicity |
+| 6 | Whisper `large-v3`, not `large-v3-turbo` | Turbo is ~2.5x faster but clearly worse on Turkish (garbled phrases) in a 3-min drama-clip comparison |
+| 7 | Sensitive VAD, beam 5, no `hotwords`, `initial_prompt` optional | Greedy decoding was worse; `hotwords` dropped whole lines; beam 8 gave no measurable gain; names via `--initial-prompt` |
+| 8 | Read extracted WAV ourselves, not via PyAV | faster-whisper 1.2.1 passes `metadata_errors` to `av.open`, which PyAV 19 rejects |
+| 9 | Repair stray words (group of <=3 words >3 s away from the rest of its Whisper segment) | After long silence Whisper stamps a segment's first word far too early ("Bu" 108 s before "arada Serkanlar nerede?") |
+| 10 | Hallucination blocklist in the language glossary (`asr_hallucinations`) | "Altyazı M.K." appeared at the end of 4 of 5 episodes; whole-cue match only |
+| 11 | Cue split pause 0.3 s (was 0.7 s) | Boundary F1 vs human subtitle breaks 0.704 -> 0.729; cues/episode 2,107 vs the human 2,105 |
+| 12 | Tone step = continuation dots + interjection "!" only | Learned on S01E01-04, held-out S01E05: precision 91% / 92%. Commas rejected (precision <= 52% at every threshold) |
+| 13 | Decoding frozen at large-v3, int8_float16, beam 5, sensitive VAD | 8-variant sweep (prompts, fp16, beam 8, no-speech) all within 14.6-15.1% content WER = noise |
+| 14 | Diarization = pyannote 3.1 in a subprocess; pins torch/torchaudio 2.5.1, huggingface_hub < 1.0 | pyannote 3.x breaks on torchaudio >= 2.9 and hub 1.x; subprocess isolates PyTorch's CUDA libs from CTranslate2 and frees VRAM |
+| 15 | Speaker turn splits a cue only at a sentence end or after a >= 0.25 s pause | Diarizers misplace boundaries mid-sentence ("- Ben / - tanıştırayım."). Measured: detects 25-35% of human-marked exchanges with ~3% false splits |
+
+## 13. Evaluation (eval/wer.py)
+Human Turkish hearing-impaired subtitles for S01E01-05 are used as reference, never as input.
+Scores: *strict* WER and *content* WER (spelling variants unified, fillers ignored, circumflex dropped).
+Baseline on 52,091 reference words: strict 16.5%, content 14.6%. Much of the remainder is style: the
+reference is condensed and written-standard ("vallahi"), the speech is colloquial ("valla").
+Do not tune toward the reference's spelling: the goal is natural spoken tone, with the reference used for
+content accuracy, cue-break agreement and punctuation conventions.
+

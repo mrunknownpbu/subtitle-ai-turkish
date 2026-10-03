@@ -1,5 +1,5 @@
 # media, models, artifacts
-data/
+workspace/
 *.mp4
 *.mkv
 *.avi

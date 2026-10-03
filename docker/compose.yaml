@@ -1,0 +1,49 @@
+# Run from the repo root:  ./scripts/subai run --input-dir /data/media/drama/turkish/MyShow --recursive
+#
+# Container paths
+#   /data    host media library (read-only, reserved for media; override with MEDIA_DIR)
+#   /input   drop folder for direct uploads  -> ./workspace/input (read-only)
+#   /output  generated subtitles             -> ./workspace/output
+#   /logs    rotating logs                   -> ./workspace/logs
+#   /models  model cache                     -> named volume "subai-models"
+# Paths below are relative to this file (docker/).
+x-subai: &subai
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  image: subai:latest
+  user: "${SUBAI_UID:-1000}:${SUBAI_GID:-1000}"
+  environment:
+    SUBAI_MODEL: ${SUBAI_MODEL:-large-v3}
+    HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
+    HF_TOKEN: ${HF_TOKEN:-}  # only for one-time downloads of gated models (e.g. pyannote)
+    TMDB_API_KEY: ${TMDB_API_KEY:-}
+    TVDB_API_KEY: ${TVDB_API_KEY:-}
+  volumes:
+    - ${MEDIA_DIR:-/data}:/data:ro
+    - ../workspace/input:/input:ro
+    - ../glossary:/glossary
+    - ${OUTPUT_DIR:-../workspace/output}:/output
+    - ../workspace/logs:/logs
+    - subai-models:/models
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+services:
+  subai:
+    <<: *subai
+
+  api:
+    <<: *subai
+    entrypoint: ["python", "-m", "uvicorn", "subai.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: []
+    ports:
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  subai-models:

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Run the subai CLI in Docker from anywhere, e.g.
+#   ./scripts/subai doctor
+#   ./scripts/subai run -i /input/clip.mkv
+#   ./scripts/subai run --input-dir "/data/media/drama/turkish/Show/Season 01" --batch
+# Env: MEDIA_DIR (default /data, mounted read-only at /data), OUTPUT_DIR (default ./workspace/output)
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export OUTPUT_DIR="${OUTPUT_DIR:-$ROOT/workspace/output}"
+export SUBAI_UID="${SUBAI_UID:-$(id -u)}" SUBAI_GID="${SUBAI_GID:-$(id -g)}"
+mkdir -p "$OUTPUT_DIR" "$ROOT/workspace/input" "$ROOT/workspace/logs"
+exec docker compose -f "$ROOT/docker/compose.yaml" run --rm subai "$@"

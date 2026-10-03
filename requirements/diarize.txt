@@ -1,0 +1,6 @@
+# pyannote.audio 3.x needs torchaudio < 2.9 (AudioMetaData) and huggingface_hub < 1.0 (use_auth_token).
+# torch 2.5.1 ships CUDA 12.4 wheels, which run on the host's newer driver.
+torch==2.5.1
+torchaudio==2.5.1
+huggingface_hub>=0.26,<1.0
+pyannote.audio>=3.3,<4

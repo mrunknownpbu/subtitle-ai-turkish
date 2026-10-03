@@ -1,0 +1,46 @@
+# Series glossary: series metadata. Matches the media folder "Love Is In The Air (2020) {tvdb-383383}".
+id: tvdb-383383
+title:
+  original: Sen Çal Kapımı        # Turkish original, use this spelling in Turkish text
+  english_release: Love Is in the Air   # TMDB / library title
+  english_tvdb: You Knock on My Door    # TVDB English translation
+  library: Love Is In The Air (2020)
+ids:
+  tvdb: 383383
+  tvdb_slug: sen-cal-kapimi
+  tmdb: 104877
+  imdb: tt12439466
+  tvmaze: 48595
+language: tr
+country: TR
+network: FOX Türkiye          # TVDB / local nfo; TVmaze currently lists NOW
+premiered: 2020-07-08
+ended: 2021-09-08
+status: Ended
+genres: [Comedy, Drama, Romance]
+seasons: 2
+episodes: 52                  # TMDB
+air_slot: Wednesday 20:00     # TVDB
+crew:                         # TMDB
+  director: [Ender Mıhlar]
+  writer: [Ayşe Üner Kutlu]
+  music: [Aytekin Ataş]
+  casting: [Tümay Özokur]
+synopsis: >
+  Eda, who ties all her hopes to her education, confronts Serkan Bolat, who cuts off her
+  international education scholarship and leaves her with a high school diploma. Serkan offers to
+  give the scholarship back if she pretends to be his fiancée for two months. Eda hates him but
+  has to accept when the conditions change. While pretending to be engaged, they begin a
+  passionate, challenging relationship.
+translation:
+  default_target: en
+  # Decision defaults, reviewer can change per series:
+  honorifics: keep            # keep "Bey"/"Hanım" after names; translate address terms like "abi" only when unnamed
+  profanity: preserve_register
+sources:
+  - {name: local tvshow.nfo, status: ok, used_for: "ids, original title, 18 cast"}
+  - {name: TVmaze API, url: "https://api.tvmaze.com/shows/48595", status: ok, used_for: "cast 26, nicknames, network"}
+  - {name: TMDB, url: "https://www.themoviedb.org/tv/104877/cast", status: ok, used_for: "cast 42 with episode counts, crew"}
+  - {name: TVDB, url: "https://www.thetvdb.com/series/sen-cal-kapimi", status: ok, used_for: "titles, aliases, network, air time"}
+  - {name: IMDb, url: "https://www.imdb.com/title/tt12439466/", status: blocked_403, used_for: "id only; no automated access"}
+retrieved: 2026-10-04

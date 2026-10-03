@@ -1,0 +1,7 @@
+faster-whisper
+pysrt
+typer
+fastapi
+uvicorn
+python-multipart
+pyyaml
