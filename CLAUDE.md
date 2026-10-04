@@ -6,6 +6,7 @@ AI-assisted pipeline that transcribes Turkish TV-series audio, translates it (de
 - @docs/product-requirements.md — scope, requirements, quality targets
 - @docs/architecture.md — pipeline stages, modules, data model, API
 - @docs/design-system.md — UI tokens/components (frontend only)
+- @docs/finetuning.md — QLoRA fine-tuning of Whisper on the series (train/prepare.py, train/finetune.py)
 - @docs/agent-guide.md — working agreements, playbooks, Turkish-specific rules
 
 ## Stack
@@ -22,6 +23,7 @@ Ryzen 5 5500 (12 threads) · 14 GB RAM · RTX 3070 **8 GB VRAM**. Run heavy mode
 - `docker/` — Dockerfile + compose.yaml; `scripts/subai` runs the CLI in Docker
 - `docs/` — product, architecture, design, agent docs
 - `requirements/` — base.txt (runtime), dev.txt (tests)
+- `train/` — dataset builder + QLoRA script; `workspace/models/` holds fine-tuned CTranslate2 models (mounted at /ft)
 - `workspace/` — gitignored local I/O: `input/` (drop folder), `output/` (SRTs), `logs/`
 - `/data` — **reserved for the media library** (host path, mounted read-only; never write there)
 

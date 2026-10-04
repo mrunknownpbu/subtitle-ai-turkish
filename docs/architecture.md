@@ -151,6 +151,9 @@ Single-page editor: media player + waveform, virtualized cue table, side-by-side
 | 14 | Diarization = pyannote 3.1 in a subprocess; pins torch/torchaudio 2.5.1, huggingface_hub < 1.0 | pyannote 3.x breaks on torchaudio >= 2.9 and hub 1.x; subprocess isolates PyTorch's CUDA libs from CTranslate2 and frees VRAM |
 | 15 | Speaker turn splits a cue only at a sentence end or after a >= 0.25 s pause | Diarizers misplace boundaries mid-sentence ("- Ben / - tanıştırayım."). Measured: detects 25-35% of human-marked exchanges with ~3% false splits |
 
+| 16 | Vocal separation (Demucs htdemucs) rejected | Whisper large-v3 is already robust to the show's music: content WER 14.63% original vs 14.80% vocals-only vs 15.82% blended |
+| 17 | QLoRA fine-tune on the series, labels = our transcript + reference corrections and punctuation | Held-out WER 14.47% -> 13.49%; commas 3.2 -> 7.9 per 100 words (reference 7.5); timing unchanged. See docs/finetuning.md |
+
 ## 13. Evaluation (eval/wer.py)
 Human Turkish hearing-impaired subtitles for S01E01-05 are used as reference, never as input.
 Scores: *strict* WER and *content* WER (spelling variants unified, fillers ignored, circumflex dropped).

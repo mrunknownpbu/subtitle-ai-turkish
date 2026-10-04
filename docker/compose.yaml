@@ -23,6 +23,7 @@ x-subai: &subai
     - ${MEDIA_DIR:-/data}:/data:ro
     - ../workspace/input:/input:ro
     - ../glossary:/glossary
+    - ../workspace/models:/ft:ro
     - ${OUTPUT_DIR:-../workspace/output}:/output
     - ../workspace/logs:/logs
     - subai-models:/models

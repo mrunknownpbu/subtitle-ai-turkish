@@ -25,6 +25,7 @@ Designed for an NVIDIA GPU with 8 GB VRAM (e.g. RTX 3070), 14 GB RAM and 6 cores
 | [product-requirements.md](docs/product-requirements.md) | Scope, requirements, quality targets, milestones |
 | [architecture.md](docs/architecture.md) | Pipeline stages, stack, data model, API |
 | [design-system.md](docs/design-system.md) | Review editor UI tokens and components |
+| [finetuning.md](docs/finetuning.md) | QLoRA fine-tuning on the series: method, results, caveats |
 | [agent-guide.md](docs/agent-guide.md) | Conventions for AI coding agents, Turkish-specific rules |
 | [CLAUDE.md](CLAUDE.md) | Short project brief for Claude Code |
 

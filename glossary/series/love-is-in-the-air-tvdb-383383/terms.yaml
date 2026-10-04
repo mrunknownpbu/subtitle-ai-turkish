@@ -16,6 +16,8 @@ asr_corrections:
   - {heard: Selkan, correct: Serkan, note: "2x in S01E01-05; not a Turkish name"}
   - {heard: Volat, correct: Bolat, note: "2x in S01E01-05"}
   - {heard: Tırıl, correct: Pırıl, note: "2x in S01E01-05; not a word"}
+  - {heard: Aydın, correct: Aydan, note: "16x in our S01E01-05 output, 0x in the human reference; always 'Aydın Hanım' = Aydan Hanım"}
+  - {heard: Balat, correct: Bolat, note: "4x in our output, 0x in the reference. Balat is also an Istanbul district: remove if a later episode uses it"}
 # Review candidates NOT applied (could be real words/names): Meyla~Leyla, Fırıl~Pırıl ("fırıl fırıl"),
 # Tarkan~Serkan (real singer name), Berkay~Serkan (real name), Balat (Istanbul district).
 # Names heard in episodes that are not in the cast databases (add as discovered):
