@@ -69,9 +69,10 @@ services:
     command: []
     volumes:
       - ../workspace/output:/output
+      - ${MEDIA_DIR:-/data}:/data:ro
       - ../web/dist:/web:ro
     ports:
-      - "127.0.0.1:8000:8000"
+      - "8000:8000"
 
 volumes:
   subai-models:

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Waveform from "./Waveform";
 
 type Cue = { i: number; start: number; end: number; tr: string; en: string };
 
@@ -28,6 +29,10 @@ export default function App() {
   const [draft, setDraft] = useState("");
   const [status, setStatus] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const stopAt = useRef<number | null>(null);
+  const [peaks, setPeaks] = useState<{ rate: number; peaks: number[] }>({ rate: 1, peaks: [] });
+  const [now, setNow] = useState(0);
 
   useEffect(() => {
     fetch("/api/episodes").then((r) => r.json()).then((e: string[]) => { setEpisodes(e); if (e[0]) setEp(e[0]); })
@@ -40,11 +45,34 @@ export default function App() {
       .catch(() => setStatus("Cannot load episode"));
   }, [ep]);
 
+  useEffect(() => {
+    setPeaks({ rate: 1, peaks: [] });
+    if (!ep) return;
+    fetch(`/api/peaks?ep=${encodeURIComponent(ep)}`).then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then(setPeaks).catch(() => setStatus("No waveform (video not found?)"));
+  }, [ep]);
+
   const checks = useMemo(() => cues.map(check), [cues]);
   const visible = useMemo(() => cues.filter((c) => !onlyFlagged || checks[c.i].flags.length), [cues, checks, onlyFlagged]);
   const cue = cues[sel];
   useEffect(() => { setDraft(cue?.en ?? ""); }, [cue?.i, cue?.en]);
   useEffect(() => { listRef.current?.querySelector(`[data-i="${sel}"]`)?.scrollIntoView({ block: "nearest" }); }, [sel]);
+  useEffect(() => { // selecting a cue parks the video at its start
+    const v = videoRef.current;
+    if (v && cue) { stopAt.current = null; v.currentTime = cue.start; }
+  }, [cue?.i]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const playCue = () => {
+    const v = videoRef.current;
+    if (!v || !cue) return;
+    v.currentTime = cue.start; stopAt.current = cue.end; void v.play();
+  };
+  const onTime = () => {
+    const v = videoRef.current!;
+    setNow(v.currentTime);
+    if (stopAt.current !== null && v.currentTime >= stopAt.current) { v.pause(); stopAt.current = null; }
+  };
+  const playing = cues.find((c) => c.start <= now && now < c.end);
 
   const move = useCallback((d: number) => {
     const at = visible.findIndex((c) => c.i === sel);
@@ -70,6 +98,12 @@ export default function App() {
     if (e.ctrlKey && e.key === "Enter") { e.preventDefault(); void save(true); }
     else if (e.ctrlKey && e.key === "ArrowDown") { e.preventDefault(); move(1); }
     else if (e.ctrlKey && e.key === "ArrowUp") { e.preventDefault(); move(-1); }
+    else if (e.ctrlKey && e.key.toLowerCase() === "l") { e.preventDefault(); playCue(); }
+    else if (e.key === " " && !/^(TEXTAREA|SELECT|INPUT|BUTTON)$/.test((e.target as HTMLElement).tagName)) {
+      e.preventDefault();
+      const v = videoRef.current;
+      if (v) { stopAt.current = null; void (v.paused ? v.play() : v.pause()); }
+    }
   };
 
   const m = cue ? check({ ...cue, en: draft }) : null;
@@ -103,6 +137,11 @@ export default function App() {
           })}
         </div>
         <section className="editor" aria-label="Cue editor">
+          <div className="player">
+            <video ref={videoRef} src={ep ? `/api/video?ep=${encodeURIComponent(ep)}` : undefined} controls preload="metadata"
+              onTimeUpdate={onTime} onSeeked={onTime} onError={() => setStatus("Video failed to load (first play converts the episode, about a minute)")} />
+            {playing && <div className="overlay" lang="en">{playing.en}</div>}
+          </div>
           {cue ? (
             <>
               <div className="mono hint">#{cue.i + 1} · {tc(cue.start)} → {tc(cue.end)} · {(cue.end - cue.start).toFixed(1)} s</div>
@@ -120,11 +159,12 @@ export default function App() {
                 <button className="primary" onClick={() => void save(true)}>Save and next</button>
                 <button onClick={() => setDraft(cue.en)} disabled={draft === cue.en}>Revert</button>
               </div>
-              <div className="hint">Ctrl+Enter save and next · Ctrl+↑/↓ previous/next cue</div>
+              <div className="hint">Ctrl+Enter save and next · Ctrl+↑/↓ previous/next cue · Ctrl+L replay cue · Space play/pause</div>
             </>
           ) : <div className="empty">Pick an episode.</div>}
         </section>
       </div>
+      <Waveform video={videoRef} peaks={peaks.peaks} rate={peaks.rate} cues={cues} sel={sel} />
     </div>
   );
 }
