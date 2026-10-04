@@ -21,7 +21,7 @@ Labels end up with the reference's punctuation rates (7.2 commas, 1.0 exclamatio
 
 ## Workflow
 ```
-docker compose -f docker/compose.yaml build subai
+docker compose -f docker/compose.yml build subai
 docker build -f docker/train.Dockerfile -t subai-train .                       # QLoRA tooling on top of subai
 docker run --rm -u $(id -u):$(id -g) -v $PWD:/repo -v /data:/data:ro --entrypoint python subai:latest \
     /repo/train/prepare.py --episodes 1 2 3 --out /repo/workspace/train_v2      # 605 windows, 4.1 h

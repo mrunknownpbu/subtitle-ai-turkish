@@ -12,7 +12,7 @@
 3. **Post-fix** (`fix_honorifics`): Madam/Mr/Mrs/Sir become Hanım/Bey when the Turkish has them, and "Bey Evren" becomes "Evren Bey".
 
 Ollama runs as the `ollama` compose service (volume `subai-ollama`, `127.0.0.1:11434`, one model loaded). Start it with
-`docker compose -f docker/compose.yaml up -d ollama` and stop it before Whisper jobs: they do not share the GPU well.
+`docker compose -f docker/compose.yml up -d ollama` and stop it before Whisper jobs: they do not share the GPU well.
 Prompt rules are in `system_prompt()`; change `PROMPT_VERSION` when they change.
 
 ## Measurements (S01E05, 1,384 cues paired with the human English subtitle, corpus chrF)

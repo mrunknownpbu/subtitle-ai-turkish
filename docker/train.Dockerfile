@@ -1,5 +1,5 @@
 # Fine-tuning image: the inference image plus QLoRA tooling. Build the inference image first:
-#   docker compose -f docker/compose.yaml build subai
+#   docker compose -f docker/compose.yml build subai
 #   docker build -f docker/train.Dockerfile -t subai-train .
 FROM subai:latest
 USER root

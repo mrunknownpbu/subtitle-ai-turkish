@@ -52,7 +52,7 @@ Use tokens from `design-system.md`; no hard-coded colors. Every interactive elem
 
 ## 5. Quality Gates (must pass before finishing)
 ```
-docker compose -f docker/compose.yaml run --rm --entrypoint pytest subai -q
+docker compose -f docker/compose.yml run --rm --entrypoint pytest subai -q
 # ruff / mypy: to be added to requirements/dev.txt
 ```
 Frontend (if touched): `pnpm lint && pnpm typecheck && pnpm test`.

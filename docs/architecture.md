@@ -48,7 +48,7 @@ video/audio
 subtitle-ai-turkish/
 ├── README.md  LICENSE  CLAUDE.md
 ├── docs/                       # product-requirements, architecture, design-system, agent-guide
-├── docker/                     # Dockerfile, compose.yaml
+├── docker/                     # Dockerfile, compose.yml
 ├── scripts/subai               # runs the CLI inside Docker
 ├── requirements/               # base.txt (runtime), dev.txt (tests)
 ├── src/subai/
@@ -116,8 +116,8 @@ WS   /episodes/{id}/progress
 Single-page editor: media player + waveform, virtualized cue table, side-by-side TR/target, flagged-queue filter, shortcut-driven. See `design-system.md`.
 
 ## 9. Deployment
-- Run: `./scripts/subai <command>` (wraps `docker compose -f docker/compose.yaml run --rm subai`).
-- Docker + NVIDIA Container Toolkit. `docker/compose.yaml` services: `subai` (CLI/batch, run on demand) and `api` (FastAPI on 127.0.0.1). Mounts: media library read-only (`/data`), `./workspace` for input/output/logs, a named volume for the model cache. `ollama` (LLM translation, bound to 127.0.0.1, volume `subai-ollama`, one model loaded) is reached by `subai` over the compose network, never the internet.
+- Run: `./scripts/subai <command>` (wraps `docker compose -f docker/compose.yml run --rm subai`).
+- Docker + NVIDIA Container Toolkit. `docker/compose.yml` services: `subai` (CLI/batch, run on demand) and `api` (FastAPI on 127.0.0.1). Mounts: media library read-only (`/data`), `./workspace` for input/output/logs, a named volume for the model cache. `ollama` (LLM translation, bound to 127.0.0.1, volume `subai-ollama`, one model loaded) is reached by `subai` over the compose network, never the internet.
 - No inbound network exposure by default (binds 127.0.0.1).
 
 ## 10. Security & Privacy

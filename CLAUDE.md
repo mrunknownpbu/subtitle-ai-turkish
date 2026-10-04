@@ -16,12 +16,19 @@ AI-assisted pipeline that transcribes Turkish TV-series audio, translates it (de
 ## Hardware (target server)
 Ryzen 5 5500 (12 threads) · 14 GB RAM · RTX 3070 **8 GB VRAM**. Run heavy models one at a time (Whisper int8_float16, then a Q4 7–9B LLM); unload between stages. Ollama runs as a compose service (stop it before Whisper jobs).
 
+## Environments
+- **Testing site:** this directory, `/opt/projects/subtitle-ai-turkish/`. Build, test and experiment here.
+- **Production:** `/opt/docker/`. Only deploy here when the user asks.
+  - `compose/` — compose files, always named `compose.yml`; shared `.env` at `compose/.env`
+  - `appdata/` — persistent storage and application data
+  - `script/` — custom scripts
+
 ## Layout
 - `src/subai/pipeline/` — audio, transcribe, segmenter, srtio, runner (ingest → ASR → segment → SRT)
 - `src/subai/translate.py` — Turkish SRT → English: opus-mt draft, Qwen3 edit via Ollama (see docs/translation.md)
 - `web/` — review editor
 - `eval/` — WER, readability, translation evals
-- `docker/` — Dockerfile + compose.yaml; `scripts/subai` runs the CLI in Docker
+- `docker/` — Dockerfile + compose.yml; `scripts/subai` runs the CLI in Docker
 - `docs/` — product, architecture, design, agent docs
 - `requirements/` — base.txt (runtime), dev.txt (tests)
 - `train/` — dataset builder + QLoRA script; `workspace/models/` holds fine-tuned CTranslate2 models (mounted at /ft)
@@ -34,11 +41,11 @@ Ryzen 5 5500 (12 threads) · 14 GB RAM · RTX 3070 **8 GB VRAM**. Run heavy mode
 ./scripts/subai run --input-dir "/data/media/.../{tvdb-383383}/Season 01" --recursive --diarize   # series glossary auto-detected
 ./scripts/subai glossary-fetch --series tvdb-383383 [--write]   # TMDB+TVDB refresh (needs API keys in docker/.env)
 python3 eval/wer.py --ref REF.srt --hyp OUT.srt   # strict + content WER vs the human reference
-docker compose -f docker/compose.yaml up -d ollama   # once; then:
+docker compose -f docker/compose.yml up -d ollama   # once; then:
 ./scripts/subai translate -i "/output/<name>.tr.srt" --series tvdb-383383   # -> <name>.en.srt
 python3 eval/chrf.py --ref REF.en.hi.srt --hyp OUT.en.srt   # English chrF vs the human subtitle
 ./scripts/subai run -i /input/<file> | --input-dir /data/<folder> --batch
-docker compose -f docker/compose.yaml run --rm --entrypoint pytest subai -q
+docker compose -f docker/compose.yml run --rm --entrypoint pytest subai -q
 (lint/type-check: planned)
 ```
 
@@ -51,7 +58,7 @@ docker compose -f docker/compose.yaml run --rm --entrypoint pytest subai -q
 - Translate 1:1 per segment with surrounding context; cue merging/splitting is Format's job.
 - Turkish text: Unicode NFC, locale-aware casing (İ/ı), suffix-aware glossary matching.
 - Mock the translator and models in tests; no big model downloads in CI.
-- **Docker is the supported runtime** (NVIDIA GPU via the NVIDIA Container Toolkit). `docker/Dockerfile` + `docker/compose.yaml`; media mounted read-only, output and model cache on volumes. Containers need no outbound network at runtime after models are cached.
+- **Docker is the supported runtime** (NVIDIA GPU via the NVIDIA Container Toolkit). `docker/Dockerfile` + `docker/compose.yml`; media mounted read-only, output and model cache on volumes. Containers need no outbound network at runtime after models are cached.
 - **Everything runs locally.** No cloud APIs, telemetry or network calls at runtime; no audio, video or text leaves the machine. Models are downloaded once, then used offline (`HF_HUB_OFFLINE=1`). Do not add a cloud provider.
 - Local services bind 127.0.0.1 only. Never commit media, models or tokens (`HF_TOKEN` is only needed once to download gated pyannote weights).
 - Use design tokens, never hard-coded colors; every control must be keyboard accessible.
