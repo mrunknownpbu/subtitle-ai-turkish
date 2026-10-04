@@ -67,6 +67,9 @@ services:
     <<: *subai
     entrypoint: ["python", "-m", "uvicorn", "subai.api:app", "--host", "0.0.0.0", "--port", "8000"]
     command: []
+    volumes:
+      - ../workspace/output:/output
+      - ../web/dist:/web:ro
     ports:
       - "127.0.0.1:8000:8000"
 
