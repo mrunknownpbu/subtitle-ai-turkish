@@ -105,6 +105,28 @@ def run(
     raise typer.Exit(1 if failed else 0)
 
 
+@app.command()
+def translate(
+    input: Path = typer.Option(..., "--input", "-i", help="Turkish .srt"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Default: <input> with .tr.srt -> .en.srt"),
+    model: str = typer.Option(os.environ.get("SUBAI_LLM", "qwen3:8b"), "--model", help="Ollama model tag."),
+    series: Optional[str] = typer.Option(None, "--series", help="Series glossary id, e.g. tvdb-383383."),
+    glossary_dir: Path = typer.Option(DEFAULT_GLOSSARY_DIR, "--glossary-dir", envvar="SUBAI_GLOSSARY_DIR"),
+    limit: Optional[int] = typer.Option(None, "--limit", help="Only the first N cues (for trials)."),
+    draft: str = typer.Option("opus", "--draft", help="First-pass English for the LLM to edit: opus (opus-mt, default), none, or an English .srt with the same cues."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Translate a Turkish SRT to English with a local Ollama model."""
+    from subai.glossary import load_series
+    from subai.translate import translate_srt
+
+    setup_logging(verbose)
+    sg = load_series(glossary_dir, series) if series else None
+    dst = output or input.with_name(input.name.replace(".tr.srt", ".en.srt") if ".tr.srt" in input.name else input.stem + ".en.srt")
+    n = translate_srt(input, dst, model, sg, limit, draft)
+    log.info("Wrote %s (%d cues, %s)", dst, n, model)
+
+
 @app.command("download-model")
 def download_model_cmd(model: str = typer.Argument(DEFAULT_MODEL), verbose: bool = False) -> None:
     """Download a Whisper model into the model cache (needs network once)."""

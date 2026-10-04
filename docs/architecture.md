@@ -117,7 +117,7 @@ Single-page editor: media player + waveform, virtualized cue table, side-by-side
 
 ## 9. Deployment
 - Run: `./scripts/subai <command>` (wraps `docker compose -f docker/compose.yaml run --rm subai`).
-- Docker + NVIDIA Container Toolkit. `docker/compose.yaml` services: `subai` (CLI/batch, run on demand) and `api` (FastAPI on 127.0.0.1). Mounts: media library read-only (`/data`), `./workspace` for input/output/logs, a named volume for the model cache. Host-side Ollama (optional, for LLM translation) is reached over the host network, never the internet.
+- Docker + NVIDIA Container Toolkit. `docker/compose.yaml` services: `subai` (CLI/batch, run on demand) and `api` (FastAPI on 127.0.0.1). Mounts: media library read-only (`/data`), `./workspace` for input/output/logs, a named volume for the model cache. `ollama` (LLM translation, bound to 127.0.0.1, volume `subai-ollama`, one model loaded) is reached by `subai` over the compose network, never the internet.
 - No inbound network exposure by default (binds 127.0.0.1).
 
 ## 10. Security & Privacy
@@ -153,6 +153,7 @@ Single-page editor: media player + waveform, virtualized cue table, side-by-side
 
 | 16 | Vocal separation (Demucs htdemucs) rejected | Whisper large-v3 is already robust to the show's music: content WER 14.63% original vs 14.80% vocals-only vs 15.82% blended |
 | 17 | QLoRA fine-tune on the series, labels = our transcript + reference corrections and punctuation | Held-out WER 14.47% -> 13.49%; commas 3.2 -> 7.9 per 100 words (reference 7.5); timing unchanged. See docs/finetuning.md |
+| 18 | Translation = opus-mt draft + Qwen3 8B edit (Ollama), 1:1 per cue, honorific post-fix | S01E05 chrF vs human English: Qwen alone 48.5, opus-mt 51.4, opus-mt + Qwen edit 51.7; Gemma 12B runs partly on CPU at 8 GB. See docs/translation.md |
 
 ## 13. Evaluation (eval/wer.py)
 Human Turkish hearing-impaired subtitles for S01E01-05 are used as reference, never as input.

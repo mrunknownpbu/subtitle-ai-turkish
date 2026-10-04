@@ -6,6 +6,7 @@ AI-assisted pipeline that transcribes Turkish TV-series audio, translates it (de
 - @docs/product-requirements.md — scope, requirements, quality targets
 - @docs/architecture.md — pipeline stages, modules, data model, API
 - @docs/design-system.md — UI tokens/components (frontend only)
+- @docs/translation.md — Turkish→English translation: design, measurements, limits
 - @docs/finetuning.md — QLoRA fine-tuning of Whisper on the series (train/prepare.py, train/finetune.py)
 - @docs/agent-guide.md — working agreements, playbooks, Turkish-specific rules
 
@@ -13,11 +14,11 @@ AI-assisted pipeline that transcribes Turkish TV-series audio, translates it (de
 **100% local, offline-capable.** Python 3.12 in Docker · faster-whisper · WhisperX · Silero VAD · pyannote · local LLM translator via Ollama/llama.cpp (pluggable; NLLB-200 as lightweight fallback) · FastAPI · SQLite · React + TypeScript + Vite.
 
 ## Hardware (target server)
-Ryzen 5 5500 (12 threads) · 14 GB RAM · RTX 3070 **8 GB VRAM**. Run heavy models one at a time (Whisper int8_float16, then a Q4 7–9B LLM); unload between stages. Ollama is not installed yet.
+Ryzen 5 5500 (12 threads) · 14 GB RAM · RTX 3070 **8 GB VRAM**. Run heavy models one at a time (Whisper int8_float16, then a Q4 7–9B LLM); unload between stages. Ollama runs as a compose service (stop it before Whisper jobs).
 
 ## Layout
 - `src/subai/pipeline/` — audio, transcribe, segmenter, srtio, runner (ingest → ASR → segment → SRT)
-- `src/subai/translate/` — Translator protocol, prompts (versioned), glossary
+- `src/subai/translate.py` — Turkish SRT → English: opus-mt draft, Qwen3 edit via Ollama (see docs/translation.md)
 - `web/` — review editor
 - `eval/` — WER, readability, translation evals
 - `docker/` — Dockerfile + compose.yaml; `scripts/subai` runs the CLI in Docker
@@ -33,6 +34,9 @@ Ryzen 5 5500 (12 threads) · 14 GB RAM · RTX 3070 **8 GB VRAM**. Run heavy mode
 ./scripts/subai run --input-dir "/data/media/.../{tvdb-383383}/Season 01" --recursive --diarize   # series glossary auto-detected
 ./scripts/subai glossary-fetch --series tvdb-383383 [--write]   # TMDB+TVDB refresh (needs API keys in docker/.env)
 python3 eval/wer.py --ref REF.srt --hyp OUT.srt   # strict + content WER vs the human reference
+docker compose -f docker/compose.yaml up -d ollama   # once; then:
+./scripts/subai translate -i "/output/<name>.tr.srt" --series tvdb-383383   # -> <name>.en.srt
+python3 eval/chrf.py --ref REF.en.hi.srt --hyp OUT.en.srt   # English chrF vs the human subtitle
 ./scripts/subai run -i /input/<file> | --input-dir /data/<folder> --batch
 docker compose -f docker/compose.yaml run --rm --entrypoint pytest subai -q
 (lint/type-check: planned)
@@ -54,4 +58,4 @@ docker compose -f docker/compose.yaml run --rm --entrypoint pytest subai -q
 - Keep changes minimal and tied to a PRD requirement (FR#). Ask before adding heavy dependencies or changing the data model.
 
 ## Status
-Planning stage: docs only, no code yet. Next: M1 core pipeline (ingest → ASR → Turkish SRT).
+Transcription (v2 fine-tuned Whisper, tone, diarization, glossary) and Turkish→English translation (opus-mt draft + Qwen3 edit) work per episode. Next: Format stage (cue merge/split, reading speed), export formats, review UI.

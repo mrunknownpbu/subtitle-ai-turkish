@@ -8,6 +8,8 @@ terms:
   - {tr: sahte nişan, en: fake engagement, policy: translate, verified: true}
   - {tr: Bolat, en: Bolat, policy: keep, note: "Family surname (Serkan, Aydan, Alptekin).", verified: true}
   - {tr: Art Life, en: Art Life, policy: keep, note: "Company name in the show, believed to be Serkan's architecture firm.", verified: false}
+  - {tr: "Oley", en: "Yay", policy: translate, note: "Cheering interjection, not a name (subtitle-ai S1 sweep: 3 uses).", verified: true}
+  - {tr: "Hişt", en: "Psst", policy: translate, note: "Attention-getter.", verified: false}
 # Explicit, reviewable fixes for recurring Whisper misspellings of names (whole-word, case-sensitive,
 # apostrophe suffixes preserved). Deliberately NOT fuzzy: Selim/Kerim are real different names.
 asr_corrections:
