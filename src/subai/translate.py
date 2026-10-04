@@ -62,11 +62,11 @@ def system_prompt(sg: SeriesGlossary | None, target: str = "English", drafts: bo
 
 def chat(model: str, system: str, user: str) -> str:
     body = {"model": model, "stream": False, "think": False, "format": SCHEMA,
-            "options": {"temperature": 0, "num_ctx": 6144},
+            "options": {"temperature": 0, "num_ctx": 6144, "num_predict": 1024},  # cap runaway generations
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
     req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", json.dumps(body).encode(),
                                  {"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=600) as r:
+    with urllib.request.urlopen(req, timeout=180) as r:
         return json.load(r)["message"]["content"]
 
 
@@ -86,7 +86,18 @@ def _ask(model, system, ids, tr, en, tries=3, drafts=None):
         log.warning("id mismatch %s vs %s, retrying", sorted(got), ids)
     if len(ids) > 1:
         return {k: v for i in ids for k, v in _ask(model, system, [i], tr, en, tries, drafts).items()}
+    if drafts:
+        log.warning("model failed on cue %d, keeping the machine draft: %r", ids[0], tr[ids[0]])
+        return {ids[0]: drafts[ids[0]]}
     raise RuntimeError(f"model failed to translate cue {ids[0]}: {tr[ids[0]]!r}")
+
+
+_REPEAT = re.compile(r"\b(\w+)(?:[\s,.!?…-]+\1\b){2,}", re.I)
+
+
+def collapse_repeats(text: str) -> str:
+    """Whisper sometimes loops ('gel, gel, gel, ...'); the LLM loops on it too. Keep two repeats."""
+    return _REPEAT.sub(lambda m: f"{m[1]} {m[1]}", text)
 
 
 _HONORIFIC = ((re.compile(r"\b(Madam|Mrs?\.?|Ms\.?|Miss)(?=\W|$)"), "Hanım"), (re.compile(r"\b(Sir|Mr\.?)(?=\W|$)"), "Bey"))
@@ -146,7 +157,7 @@ def translate_srt(src: Path, dst: Path, model: str, sg: SeriesGlossary | None, l
     subs = pysrt.open(str(src), encoding="utf-8")
     if limit:
         subs = subs[:limit]
-    tr = [s.text for s in subs]
+    tr = [collapse_repeats(s.text) for s in subs]
     en: dict[int, str] = {}
     drafts = load_drafts(draft, tr)
     system = system_prompt(sg, drafts=bool(drafts))

@@ -58,6 +58,13 @@ def test_ask_raises_when_a_single_cue_never_translates(monkeypatch):
         T._ask("m", "sys", [0], ["a"], {}, tries=2)
 
 
+def test_collapse_repeats_and_draft_fallback(monkeypatch):
+    assert T.collapse_repeats("Aşkım, sen gel, gel, gel, gel, gel, gel...") == "Aşkım, sen gel gel..."
+    assert T.collapse_repeats("Gel gel.") == "Gel gel."
+    monkeypatch.setattr(T, "chat", fake_chat(lambda p: {}))
+    assert T._ask("m", "sys", [0], ["a"], {}, tries=1, drafts=["draft"]) == {0: "draft"}
+
+
 def test_translate_srt_dashes_honorifics_and_drafts(monkeypatch, tmp_path):
     src, dst = tmp_path / "a.tr.srt", tmp_path / "a.en.srt"
     write_srt(src, ["Ayfer Hanım.", "- Gel.\n- Gelmem.", "Tamam."])
