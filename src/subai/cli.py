@@ -140,6 +140,7 @@ def retime_cmd(
     search_root: Path = typer.Option(Path("/output"), "--search-root", envvar="SUBAI_OUTPUT_DIR",
                                      help="Where cached transcripts (.subai/<video>.words.json) are looked up."),
     audio_track: Optional[int] = typer.Option(None, "--audio-track", help="0-based audio stream index."),
+    retranscribe: bool = typer.Option(False, "--retranscribe", help="Ignore cached transcripts and run Whisper again."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Move a subtitle's cues onto the video's audio (text is never changed). Exit 2 if the evidence is too thin."""
@@ -150,7 +151,7 @@ def retime_cmd(
     setup_logging(verbose)
     dst = output or input.with_name(input.stem + ".retimed.srt")
     try:
-        report, source = retime_file(video, input, dst, lambda: Transcriber(model=model, lang=lang), search_root, lang, audio_track)
+        report, source = retime_file(video, input, dst, lambda: Transcriber(model=model, lang=lang), search_root, lang, audio_track, retranscribe)
     except RetimeRefused as exc:
         log.error("Refused, nothing written: %s", exc)
         raise typer.Exit(2)

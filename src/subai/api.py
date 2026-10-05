@@ -384,7 +384,7 @@ async def retime(request: Request, video: str, name: str, src: str = "", replace
         write_subs_atomic(scratch, subs, allow_overwrite=True)
         dest = ROOT / "uploads" / f"{stem}.tr.srt"
         cmd = [sys.executable, "-m", "subai", "retime", "-i", str(scratch), "--video", str(v),
-               "-o", str(dest), "--search-root", str(ROOT)]
+               "-o", str(dest), "--search-root", str(ROOT), "--retranscribe"]
         return _start_job([("Re-timing", cmd, None if replace_original else dest)], f"uploads/{stem}", str(v.relative_to(MEDIA)),
                           finish=lambda: _ensure_pair(stem, "tr"), cleanup=lambda: scratch.unlink(missing_ok=True))
     except Exception:
@@ -440,10 +440,10 @@ async def process(request: Request, video: str, transcribe: bool = True, transla
         if retime:
             write_subs_atomic(scratch, parsed, allow_overwrite=True)  # type: ignore[arg-type]
             steps.append(("Re-timing", py + ["retime", "-i", str(scratch), "--video", str(v), "-o", str(tr),
-                                             "--search-root", str(ROOT)], None if overwrite_original else tr))
+                                             "--search-root", str(ROOT), "--retranscribe"], None if overwrite_original else tr))
         if transcribe:
             steps.append(("Transcribing audio", py + ["run", "-i", str(v), "-o", str(ROOT / "uploads"), "--model",
-                                                      model or os.environ.get("SUBAI_MODEL", "large-v3"), "--overwrite"],
+                                                      model or os.environ.get("SUBAI_MODEL", "large-v3"), "--overwrite", "--retranscribe"],
                           None if overwrite_original else tr))
         if translate:
             sid = detect_series_id(v)

@@ -167,16 +167,17 @@ def cached_words(stem: str, root: Path) -> list[Word] | None:
 
 
 def retime_file(video: Path, srt_in: Path, out_path: Path, make_transcriber, search_root: Path,
-                lang: str = "tr", track: int | None = None) -> tuple[RetimeReport, str]:
+                lang: str = "tr", track: int | None = None, fresh: bool = False) -> tuple[RetimeReport, str]:
     """Write srt_in with its cue times moved onto the video's audio (text untouched) to out_path.
     Word times come from a cached transcript of the video, else the audio is transcribed first
-    (GPU, minutes); `make_transcriber` is only called then. Raises RetimeRefused. -> (report, "cache"|"fresh")"""
+    (GPU, minutes); `make_transcriber` is only called then. `fresh` ignores every cache and transcribes again.
+    Raises RetimeRefused. -> (report, "cache"|"fresh")"""
     subs = read_srt(srt_in.read_bytes())
-    words, source = cached_words(video.stem, search_root), "cache"
+    words, source = (None if fresh else cached_words(video.stem, search_root)), "cache"
     if words is None:
         source, tr = "fresh", make_transcriber()
         try:
-            words, _ = get_words(video, out_path.parent / ".subai", tr, track)
+            words, _ = get_words(video, out_path.parent / ".subai", tr, track, force=fresh)
         finally:
             tr.close()
     cues = [Cue(s.start.ordinal / 1000, s.end.ordinal / 1000, s.text.replace("\n", " ")) for s in subs]

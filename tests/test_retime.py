@@ -161,3 +161,39 @@ def test_retime_file_uses_cached_words_and_keeps_text(tmp_path):
     assert [s.text for s in got] == texts
     assert sum(abs(s.start.ordinal / 1000 - c.start) for s, c in zip(got, truth)) / len(truth) < 0.2
     assert not out.with_name("out.srt.part").exists()
+
+
+def test_retime_file_fresh_ignores_cached_words(tmp_path):
+    import json
+
+    import pysrt
+
+    from subai.pipeline import runner
+
+    truth, words = make_programme()
+    video = tmp_path / "ep.mkv"
+    video.write_bytes(b"x")
+    cache = tmp_path / "out" / ".subai"
+    cache.mkdir(parents=True)
+    (cache / "ep.words.json").write_text(json.dumps({"key": {}, "duration": 1, "words": [["stale", 0, 1]]}), encoding="utf-8")
+    src = tmp_path / "in.srt"
+    pysrt.SubRipFile(items=[pysrt.SubRipItem(1, start=0, end=1000, text="x")]).save(str(src), encoding="utf-8")
+    calls = []
+
+    class Fake:
+        def close(self):
+            pass
+
+    def fake_get_words(video, cache_dir, tr, track, force=False):
+        calls.append(force)
+        return words, 1.0
+
+    runner.get_words, orig = fake_get_words, runner.get_words
+    try:
+        try:
+            runner.retime_file(video, src, tmp_path / "o.srt", Fake, tmp_path, fresh=True)
+        except Exception:
+            pass  # refusal on one cue is fine: only the transcription path is under test
+    finally:
+        runner.get_words = orig
+    assert calls == [True]
