@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from subai.glossary import detect_series_id
+from subai.output import is_protected, write_subs_atomic
 from subai.pipeline.srtio import read_srt
 
 ROOT = Path(os.environ.get("SUBAI_OUTPUT", "/output")).resolve()
@@ -62,6 +63,8 @@ def cues(ep: str) -> list[dict]:
 @app.put("/api/cues/{i}")
 def save_cue(i: int, ep: str, edit: CueEdit) -> dict:
     _, en = _pair(ep)
+    if any(j["ep"] == ep and j["state"] in ("queued", "running") for j in RETIMES.values()):
+        raise HTTPException(409, "a job is working on this episode; wait for it to finish before editing")
     subs = pysrt.open(str(en), encoding="utf-8")
     if not 0 <= i < len(subs):
         raise HTTPException(404, "cue not found")
@@ -69,9 +72,7 @@ def save_cue(i: int, ep: str, edit: CueEdit) -> dict:
     if not orig.exists():  # keep the machine output the first time a human edits it
         shutil.copy2(en, orig)
     subs[i].text = edit.en
-    tmp = en.with_name(en.name + ".part")
-    subs.save(str(tmp), encoding="utf-8")
-    tmp.replace(en)
+    write_subs_atomic(en, subs, allow_overwrite=True)
     return {"i": i, "en": edit.en}
 
 
@@ -161,15 +162,20 @@ def set_video_choice(ep: str, c: VideoChoice) -> dict:
     return video_choice(ep)
 
 
-def _store_srt(name: str, lang: str, data: bytes) -> str:
-    """Save an uploaded SRT as uploads/<name>.<lang>.srt; the other language gets a blank copy with the same timings."""
+def _store_srt(name: str, lang: str, data: bytes, replace: bool = False) -> str:
+    """Save an uploaded SRT as uploads/<name>.<lang>.srt (an existing file is kept unless `replace`);
+    the other language gets a blank copy with the same timings."""
     if lang not in ("tr", "en"):
         raise HTTPException(400, "lang must be tr or en")
     stem = _safe_stem(name)
     subs = _parse_srt(data)
     d = ROOT / "uploads"
     d.mkdir(exist_ok=True)
-    subs.save(str(d / f"{stem}.{lang}.srt"), encoding="utf-8")
+    dest = d / f"{stem}.{lang}.srt"
+    # the blank copy made for the missing language is a placeholder, not the user's work: a real upload replaces it
+    placeholder = dest.exists() and not any(c.text.strip() for c in pysrt.open(str(dest), encoding="utf-8"))
+    if not write_subs_atomic(dest, subs, allow_overwrite=replace or placeholder):
+        raise HTTPException(409, f"{stem}.{lang}.srt already exists: tick Replace to overwrite it, or choose another name")
     _ensure_pair(stem, lang)
     return f"uploads/{stem}"
 
@@ -196,15 +202,15 @@ def _ensure_pair(stem: str, lang: str) -> None:
         subs = pysrt.open(str(d / f"{stem}.{lang}.srt"), encoding="utf-8")
         for s in subs:
             s.text = ""
-        subs.save(str(other), encoding="utf-8")
+        write_subs_atomic(other, subs, allow_overwrite=False)
 
 
 @app.post("/api/upload")
-async def upload(request: Request, name: str, lang: str) -> dict:
+async def upload(request: Request, name: str, lang: str, replace: bool = False) -> dict:
     data = await request.body()
     if len(data) > MAX_SRT:
         raise HTTPException(413, "file too large for a subtitle")
-    return {"ep": _store_srt(name, lang, data)}
+    return {"ep": _store_srt(name, lang, data, replace)}
 
 
 RETIMES: dict[str, dict] = {}
@@ -243,12 +249,16 @@ def _load_jobs() -> None:
         RETIMES[f.stem] = job
 
 
-def _run_job(job: dict, steps: list[tuple[str, list[str]]], finish, cleanup=lambda: None, jid: str = "", prepare=lambda: None) -> None:
+def _run_job(job: dict, steps: list[tuple], finish, cleanup=lambda: None, jid: str = "", prepare=lambda: None) -> None:
     """Run `subai` CLI steps one after another (stop at the first failure), streaming their log into the job.
     Exit code 2 from `retime` means refused: not enough evidence, nothing written."""
     try:
-        prepare()
-        for label, cmd in steps:
+        if msg := prepare():
+            job["log"] = (job["log"] + [msg])[-40:]
+        for label, cmd, *keep in steps:
+            if keep and keep[0] is not None and keep[0].exists():  # KEEP: never replace a file the user did not ask to replace
+                job["log"] = (job["log"] + [f"== {label}", f"KEEP: {keep[0].name} already exists"])[-40:]
+                continue
             job["log"] = (job["log"] + [f"== {label}"])[-40:]
             job["step"] = label
             proc = PROCS[jid] = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -282,11 +292,11 @@ def _work() -> None:
         _run_job(job, steps, done, cleanup, jid, prepare)
 
 
-def _start_job(steps: list[tuple[str, list[str]]], ep: str, video: str, finish=lambda: None, cleanup=lambda: None,
+def _start_job(steps: list[tuple], ep: str, video: str, finish=lambda: None, cleanup=lambda: None,
                title: str = "", prepare=lambda: None) -> dict:
     """Queue a job; the single worker runs jobs in order. `prepare` runs just before its steps. Links the episode to its video when done."""
     global _worker
-    job = {"state": "queued", "log": [], "ep": ep, "title": title or " + ".join(label for label, _ in steps),
+    job = {"state": "queued", "log": [], "ep": ep, "title": title or " + ".join(st[0] for st in steps),
            "video": Path(video).name, "started": time.time(), "began": None, "ended": None, "step": ""}
     jid = uuid.uuid4().hex
     RETIMES[jid] = job
@@ -335,30 +345,47 @@ def jobs_clear() -> dict:
     return {"cleared": len(gone)}
 
 
+def _read_source(src: str) -> bytes:
+    """A Turkish SRT chosen from the media library. Reference subtitles (.en.hi.srt ...) are never read as input."""
+    s = _under(MEDIA, src)
+    if is_protected(s):
+        raise HTTPException(400, "that is a protected reference subtitle; it is never used as input")
+    if not s.is_file() or s.suffix.lower() != ".srt":
+        raise HTTPException(400, "src is not an .srt file")
+    return s.read_bytes()
+
+
+def _retimed_stem(stem: str, replace: bool) -> str:
+    """Re-timing keeps an existing uploads/<stem>.tr.srt and writes <stem>.retimed beside it unless `replace`."""
+    return stem if replace or not (ROOT / "uploads" / f"{stem}.tr.srt").exists() else f"{stem}.retimed"
+
+
 @app.post("/api/retime")
-async def retime(request: Request, video: str, name: str, src: str = "") -> dict:
+async def retime(request: Request, video: str, name: str, src: str = "", replace_original: bool = False) -> dict:
     """Re-time a Turkish SRT (request body, or `src` under the media library) onto `video`'s audio and open it as
-    the new episode uploads/<name>. Background job: poll /api/retime-job."""
+    the new episode uploads/<name>. An existing episode of that name is kept: the result is saved as <name>.retimed
+    unless `replace_original`. Queued background job: poll /api/retime-job."""
     v = _under(MEDIA, video)
     if not v.is_file() or v.suffix.lower() not in VIDEO_EXT:
         raise HTTPException(400, "not a video file")
     stem = _safe_stem(name)
     data = await request.body()
     if not data:
-        s = _under(MEDIA, src) if src else None
-        if s is None or not s.is_file() or s.suffix.lower() != ".srt":
+        if not src:
             raise HTTPException(400, "send an SRT file or choose one from the library")
-        data = s.read_bytes()
+        data = _read_source(src)
     if len(data) > MAX_SRT:
         raise HTTPException(413, "file too large for a subtitle")
     subs = _parse_srt(data)
+    stem = _retimed_stem(stem, replace_original)
     scratch = ROOT / "uploads" / f".{stem}.{uuid.uuid4().hex[:8]}.incoming.srt"  # unique: the same name may be queued twice
     try:
         scratch.parent.mkdir(exist_ok=True)
-        subs.save(str(scratch), encoding="utf-8")
+        write_subs_atomic(scratch, subs, allow_overwrite=True)
+        dest = ROOT / "uploads" / f"{stem}.tr.srt"
         cmd = [sys.executable, "-m", "subai", "retime", "-i", str(scratch), "--video", str(v),
-               "-o", str(ROOT / "uploads" / f"{stem}.tr.srt"), "--search-root", str(ROOT)]
-        return _start_job([("Re-timing", cmd)], f"uploads/{stem}", str(v.relative_to(MEDIA)),
+               "-o", str(dest), "--search-root", str(ROOT)]
+        return _start_job([("Re-timing", cmd, None if replace_original else dest)], f"uploads/{stem}", str(v.relative_to(MEDIA)),
                           finish=lambda: _ensure_pair(stem, "tr"), cleanup=lambda: scratch.unlink(missing_ok=True))
     except Exception:
         scratch.unlink(missing_ok=True)
@@ -377,10 +404,13 @@ def models() -> dict:
 
 @app.post("/api/process")
 async def process(request: Request, video: str, transcribe: bool = True, translate: bool = True,
-                  src: str = "", model: str = "", retime: bool = False) -> dict:
+                  src: str = "", model: str = "", retime: bool = False,
+                  overwrite_original: bool = False, overwrite_english: bool = False) -> dict:
     """Transcribe a library video to Turkish, re-time a supplied Turkish SRT onto its audio, and/or translate to English,
     as the episode uploads/<video name>. Steps run in that order. Re-timing needs an SRT (request body or `src`) and
-    replaces transcription as the source of the Turkish text. Translate-only needs an SRT or the episode's earlier one."""
+    replaces transcription as the source of the Turkish text. Translate-only needs an SRT or the episode's earlier one.
+    Existing files are kept (the step is skipped, logged as KEEP) unless `overwrite_original` (Turkish) or
+    `overwrite_english`; re-timing writes <name>.retimed beside an existing Turkish file instead."""
     v = _under(MEDIA, video)
     if not v.is_file() or v.suffix.lower() not in VIDEO_EXT:
         raise HTTPException(400, "not a video file")
@@ -388,16 +418,13 @@ async def process(request: Request, video: str, transcribe: bool = True, transla
         raise HTTPException(400, "choose at least one step")
     if retime and transcribe:
         raise HTTPException(400, "re-timing moves an existing subtitle; a fresh transcription is already timed to the audio")
-    stem = v.stem
+    stem = _retimed_stem(v.stem, overwrite_original) if retime else v.stem
     tr, en = ROOT / "uploads" / f"{stem}.tr.srt", ROOT / "uploads" / f"{stem}.en.srt"
     if model and model != os.environ.get("SUBAI_MODEL", "large-v3") and not _under(FT, model.removeprefix(str(FT) + "/")).is_dir():
         raise HTTPException(400, "unknown model")
     data = await request.body()
     if not data and src:
-        s = _under(MEDIA, src)
-        if not s.is_file() or s.suffix.lower() != ".srt":
-            raise HTTPException(400, "src is not an .srt file")
-        data = s.read_bytes()
+        data = _read_source(src)
     if len(data) > MAX_SRT:
         raise HTTPException(413, "file too large for a subtitle")
     if retime and not data:
@@ -411,17 +438,25 @@ async def process(request: Request, video: str, transcribe: bool = True, transla
         py = [sys.executable, "-m", "subai"]
         steps = []
         if retime:
-            parsed.save(str(scratch), encoding="utf-8")  # type: ignore[union-attr]
+            write_subs_atomic(scratch, parsed, allow_overwrite=True)  # type: ignore[arg-type]
             steps.append(("Re-timing", py + ["retime", "-i", str(scratch), "--video", str(v), "-o", str(tr),
-                                             "--search-root", str(ROOT)]))
+                                             "--search-root", str(ROOT)], None if overwrite_original else tr))
         if transcribe:
             steps.append(("Transcribing audio", py + ["run", "-i", str(v), "-o", str(ROOT / "uploads"), "--model",
-                                                      model or os.environ.get("SUBAI_MODEL", "large-v3"), "--overwrite"]))
+                                                      model or os.environ.get("SUBAI_MODEL", "large-v3"), "--overwrite"],
+                          None if overwrite_original else tr))
         if translate:
             sid = detect_series_id(v)
-            steps.append(("Translating to English", py + ["translate", "-i", str(tr), "-o", str(en)] + (["--series", sid] if sid else [])))
+            steps.append(("Translating to English", py + ["translate", "-i", str(tr), "-o", str(en)] + (["--series", sid] if sid else []),
+                          None if overwrite_english else en))
         # a supplied SRT used as is is written when the job starts, so a queued job never overwrites a running one's input
-        use_as_is = (lambda: parsed.save(str(tr), encoding="utf-8")) if parsed is not None and not retime and not transcribe else (lambda: None)
+        def use_as_is() -> str | None:
+            if parsed is None or retime or transcribe:
+                return None
+            if write_subs_atomic(tr, parsed, allow_overwrite=overwrite_original):
+                return None
+            return f"KEEP: {tr.name} already exists, so the Turkish subtitle you sent was not used (tick Replace to use it)"
+
         return _start_job(steps, f"uploads/{stem}", str(v.relative_to(MEDIA)), finish=lambda: _ensure_pair(stem, "tr"),
                           cleanup=lambda: scratch.unlink(missing_ok=True), prepare=use_as_is)
     except Exception:

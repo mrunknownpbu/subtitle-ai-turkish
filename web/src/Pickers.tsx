@@ -88,17 +88,18 @@ export function UploadDialog({ existing, onClose, onDone }: { existing: string[]
     if (f && !name) setName(stem(f.name));
   };
 
+  const [replace, setReplace] = useState(false);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const n = name.trim();
     if (!n || (!files.tr && !files.en)) { setMsg("Enter a name and choose at least one SRT file."); return; }
-    if (existing.includes(`uploads/${n}`) && !confirm(`"${n}" already exists. Replace the uploaded subtitles?`)) return;
     setBusy(true); setMsg("Uploading…");
     let ep = "";
     for (const lang of ["tr", "en"] as const) {
       const f = files[lang];
       if (!f) continue;
-      const r = await fetch(`/api/upload?name=${enc(n)}&lang=${lang}`, { method: "POST", body: f });
+      const r = await fetch(`/api/upload?name=${enc(n)}&lang=${lang}&replace=${replace}`, { method: "POST", body: f });
       if (!r.ok) { setMsg(`${f.name}: ${await err(r)}`); setBusy(false); return; }
       ep = ((await r.json()) as { ep: string }).ep;
     }
@@ -114,6 +115,7 @@ export function UploadDialog({ existing, onClose, onDone }: { existing: string[]
         <input id="up-tr" type="file" accept=".srt" onChange={(e) => pick("tr", e.target.files?.[0])} />
         <label htmlFor="up-en">English SRT</label>
         <input id="up-en" type="file" accept=".srt" onChange={(e) => pick("en", e.target.files?.[0])} />
+        <label className="check"><input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} /> Replace the subtitles if this name already exists</label>
         <div className="hint" role="status">{msg || "Choose one or both. A missing language starts empty with the same timings. Then pick its video with Change video."}</div>
         <div className="actions">
           <button className="primary" type="submit" disabled={busy}>Upload</button>
@@ -185,6 +187,7 @@ export function RetimeDialog({ defaultVideo, existing, onClose, onQueued }: {
   const [video, setVideo] = useState(defaultVideo);
   const [source, setSource] = useState<Source>({ mode: "upload", lib: "" });
   const [name, setName] = useState("");
+  const [replace, setReplace] = useState(false);
   const [msg, setMsg] = useState("");
   const begin = useSubmit(onQueued, onClose);
 
@@ -192,8 +195,7 @@ export function RetimeDialog({ defaultVideo, existing, onClose, onQueued }: {
     const n = name.trim();
     if (!video) { setMsg("Choose the video first."); return; }
     if (!n || (source.mode === "upload" ? !source.file : !source.lib)) { setMsg("Choose the subtitle and give the episode a name."); return; }
-    if (existing.includes(`uploads/${n}`) && !confirm(`"${n}" already exists. Replace it?`)) return;
-    setMsg(await begin(await fetch(`/api/retime?video=${enc(video)}&name=${enc(n)}${source.mode === "library" ? `&src=${enc(source.lib)}` : ""}`,
+    setMsg(await begin(await fetch(`/api/retime?video=${enc(video)}&name=${enc(n)}&replace_original=${replace}${source.mode === "library" ? `&src=${enc(source.lib)}` : ""}`,
       { method: "POST", body: source.mode === "upload" ? source.file : undefined })));
   };
 
@@ -205,8 +207,10 @@ export function RetimeDialog({ defaultVideo, existing, onClose, onQueued }: {
           onName={(n) => { if (!name) setName(stem(n)); }} />
         <label htmlFor="rt-name">Name for the re-timed episode</label>
         <input id="rt-name" value={name} onChange={(e) => setName(e.target.value)} />
+        <label className="check"><input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} /> Replace the episode if this name already exists</label>
         <div className="hint" role="status">
-          {msg || "Added to the queue; jobs run one at a time. Moves each cue to where it is spoken; the text is never changed. A video without a cached transcript is transcribed first (about 7 minutes on the GPU)."}
+          {msg || (existing.includes(`uploads/${name.trim()}`) && !replace ? `"${name.trim()}" exists: the result is saved as "${name.trim()}.retimed" and the original is kept. ` : "")
+            || "Added to the queue; jobs run one at a time. Moves each cue to where it is spoken; the text is never changed. A video without a cached transcript is transcribed first (about 7 minutes on the GPU)."}
         </div>
         <div className="actions">
           <button className="primary" onClick={() => void start()}>Add to queue</button>
@@ -226,6 +230,8 @@ export function ProcessDialog({ defaultVideo, onClose, onQueued }: { defaultVide
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState("");
   const [msg, setMsg] = useState("");
+  const [overTr, setOverTr] = useState(false);
+  const [overEn, setOverEn] = useState(false);
   const begin = useSubmit(onQueued, onClose);
   const transcribe = from === "transcribe", retime = from === "retime";
 
@@ -236,7 +242,7 @@ export function ProcessDialog({ defaultVideo, onClose, onQueued }: { defaultVide
   const start = async () => {
     if (!video) { setMsg("Choose the video first."); return; }
     if (!transcribe && !retime && !translate) { setMsg("Nothing to do: choose a step."); return; }
-    const q = `video=${enc(video)}&transcribe=${transcribe}&retime=${retime}&translate=${translate}${transcribe ? `&model=${enc(model)}` : ""}`
+    const q = `video=${enc(video)}&transcribe=${transcribe}&retime=${retime}&translate=${translate}&overwrite_original=${overTr}&overwrite_english=${overEn}${transcribe ? `&model=${enc(model)}` : ""}`
       + (!transcribe && source.mode === "library" && source.lib ? `&src=${enc(source.lib)}` : "");
     setMsg(await begin(await fetch(`/api/process?${q}`, { method: "POST", body: !transcribe && source.mode === "upload" ? source.file : undefined })));
   };
@@ -264,8 +270,10 @@ export function ProcessDialog({ defaultVideo, onClose, onQueued }: { defaultVide
             startAt={video} source={source} setSource={setSource} disabled={false} onName={() => {}} />
         )}
         <label className="check"><input type="checkbox" checked={translate} disabled={false} onChange={(e) => setTranslate(e.target.checked)} /> Then translate Turkish to English</label>
+        <label className="check"><input type="checkbox" checked={overTr} onChange={(e) => setOverTr(e.target.checked)} /> Replace the Turkish subtitle if this video already has one</label>
+        <label className="check"><input type="checkbox" checked={overEn} onChange={(e) => setOverEn(e.target.checked)} /> Replace the English subtitle if this video already has one</label>
         <div className="hint" role="status">
-          {msg || "Added to the queue; jobs run one at a time. Transcribing takes about 7 minutes per episode on the GPU, re-timing about a minute, translating under a minute."}
+          {msg || "Existing subtitles are kept unless you tick Replace (the step is skipped and logged as KEEP). Jobs run one at a time. Transcribing takes about 7 minutes per episode on the GPU, re-timing about a minute, translating under a minute."}
         </div>
         <div className="actions">
           <button className="primary" onClick={() => void start()}>Add to queue</button>

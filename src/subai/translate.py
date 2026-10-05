@@ -7,6 +7,7 @@ from pathlib import Path
 import pysrt
 
 from subai.glossary import SeriesGlossary
+from subai.output import write_subs_atomic
 from subai.protect import (Entity, Glossary, bare_entity_translation, build_glossary, chunk_words, is_run_on,
                            missing_entities, phrase_key, protect, qc_flag, recover_dropped_entities, restore,
                            repair_corrupted_placeholders, split_dash_lines, split_sentences)
@@ -34,6 +35,14 @@ def fix_honorifics(src: str, en: str) -> str:
             en = rx.sub(tr, en)
     # the model sometimes writes the title first ("Bey Evren"); Turkish puts it after the name
     return _TITLE_FIRST.sub(r"\2 \1", en) if "Bey" in src or "Hanım" in src else en
+
+
+def fix_gender(src: str, en: str, sg: SeriesGlossary | None) -> str:
+    """Series terms with policy gender_fix: when the Turkish has the stem, swap the model's guessed word (grandson -> granddaughter)."""
+    for t in (sg.terms if sg else []):
+        if t.get("policy") == "gender_fix" and re.search(re.escape(t["tr"]), src, re.I):
+            en = re.sub(rf"\b{t['wrong']}(s?)\b", lambda m: (t["en"].capitalize() if m[0][0].isupper() else t["en"]) + m[1], en, flags=re.I)
+    return en
 
 
 def wrap(text: str, width: int = 42) -> str:
@@ -91,7 +100,8 @@ def build_protection(sg: SeriesGlossary | None) -> Glossary:
     for c in (sg.characters if sg else []):
         ents += [Entity(f, [f]) for f in [c.name, c.name.split()[0], *c.aliases]]
     for t in (sg.terms if sg else []):
-        ents.append(Entity(t["en"] if t.get("policy") == "translate" else t["tr"], [t["tr"]]))
+        if t.get("policy") in ("translate", "keep"):
+            ents.append(Entity(t["en"] if t["policy"] == "translate" else t["tr"], [t["tr"]]))
     return build_glossary(ents)
 
 
@@ -168,15 +178,12 @@ def translate_srt(src: Path, dst: Path, sg: SeriesGlossary | None, limit: int | 
     out = pysrt.SubRipFile()
     flagged = 0
     for i, s in enumerate(subs):
-        text = fix_honorifics(s.text, en[i])
+        text = fix_gender(s.text, fix_honorifics(s.text, en[i]), sg)
         text = text if any(l.startswith("-") for l in s.text.split("\n")) else text.removeprefix("- ")
         if why := qc_flag(tr[i], text):
             flagged += 1
             log.warning("cue %d flagged (%s): %r -> %r", i + 1, why, tr[i], text)
         out.append(pysrt.SubRipItem(index=i + 1, start=s.start, end=s.end, text=wrap(text)))
     log.info("translated %d cues, %d flagged by QC (advisory)", len(tr), flagged)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.with_name(dst.name + ".part")
-    out.save(str(tmp), encoding="utf-8")
-    tmp.replace(dst)
+    write_subs_atomic(dst, out, allow_overwrite=True)  # a CLI run is an explicit request; the web layer decides KEEP/REPLACE
     return len(tr)

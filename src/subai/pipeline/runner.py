@@ -11,6 +11,7 @@ from pysrt import SubRipTime
 
 from subai.glossary import apply_corrections, is_hallucination
 from subai.models import Cue, Word
+from subai.output import write_subs_atomic
 from subai.retime import RetimeReport, retime
 from subai.pipeline.dialogue import assign_speakers, merge_dialogue
 from subai.pipeline.diarize import MODEL as DIAR_MODEL
@@ -182,10 +183,7 @@ def retime_file(video: Path, srt_in: Path, out_path: Path, make_transcriber, sea
     times, report = retime(cues, words, lang)
     for item, (start, end) in zip(subs, times):
         item.start, item.end = SubRipTime.from_ordinal(round(start * 1000)), SubRipTime.from_ordinal(round(end * 1000))
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out_path.with_name(out_path.name + ".part")
-    subs.save(str(tmp), encoding="utf-8")
-    tmp.replace(out_path)
+    write_subs_atomic(out_path, subs, allow_overwrite=True)
     return report, source
 
 

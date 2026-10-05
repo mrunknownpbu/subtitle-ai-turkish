@@ -152,6 +152,7 @@ Single-page editor: media player + waveform, virtualized cue table, side-by-side
 | 17 | QLoRA fine-tune on the series, labels = our transcript + reference corrections and punctuation | Held-out WER 14.47% -> 13.49%; commas 3.2 -> 7.9 per 100 words (reference 7.5); timing unchanged. See docs/finetuning.md |
 | 18 | ~~opus-mt draft + Qwen3 8B edit (Ollama)~~ superseded by 19 | S01E05 chrF 52.2 for the Qwen edit; see docs/translation.md |
 | 19 | Translation = opus-mt-tc-big-tr-en + deterministic Turkish handling, no LLM, 1:1 per cue, honorific post-fix | Same transcript, chrF vs human English: S01E05 52.5 (shipped Qwen edit 52.2), S02E01 53.1 (52.6). Removes the Ollama service and its VRAM conflict with Whisper; about 40 s per episode instead of ~14 min. Approach ported from the sibling project subtitle-ai |
+| 20 | Subtitle writes follow the sibling's method: one `output.py` writer (unique temp, fsync, atomic rename), keep by default, reference subtitles (`.en.hi.srt`, `.en.forced.srt`, `.en.sdh.srt`) never written or read as input | Web jobs skip a step whose output exists (logged as KEEP) unless Replace is ticked; re-timing saves `<name>.retimed` beside an existing episode; editor saves are refused (409) while a job works on the episode. The editor also keeps `.orig` of the machine English on its first edit |
 
 ## 13. Evaluation (eval/wer.py)
 Human Turkish hearing-impaired subtitles for S01E01-05 are used as reference, never as input.

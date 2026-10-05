@@ -4,6 +4,7 @@ from pathlib import Path
 import pysrt
 
 from subai.models import Cue
+from subai.output import write_subs_atomic
 
 
 def read_srt(data: bytes) -> pysrt.SubRipFile:
@@ -26,7 +27,4 @@ def write_srt(cues: list[Cue], path: Path) -> None:
                 text=c.text,
             )
         )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".part")
-    subs.save(str(tmp), encoding="utf-8")
-    tmp.replace(path)
+    write_subs_atomic(path, subs, allow_overwrite=True)

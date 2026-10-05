@@ -161,3 +161,12 @@ def test_translator_needs_a_gpu(monkeypatch):
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     with pytest.raises(RuntimeError, match="GPU"):
         T.Translator()
+
+
+def test_fix_gender_swaps_the_guessed_word_only_when_the_stem_is_in_the_source():
+    sg = SeriesGlossary("t", {}, {}, [], [{"tr": "torun", "en": "granddaughter", "wrong": "grandson", "policy": "gender_fix"}])
+    assert T.fix_gender("O benim torunum.", "He's my grandson.", sg) == "He's my granddaughter."
+    assert T.fix_gender("Torunumu aldılar.", "Grandsons first.", sg) == "Granddaughters first."
+    assert T.fix_gender("Oğlum geldi.", "My grandson came.", sg) == "My grandson came."  # no torun in the source
+    assert T.fix_gender("torunum", "grandson", None) == "grandson"
+    assert T.build_protection(sg) == {}  # a gender_fix term is not a protected name

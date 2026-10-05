@@ -157,3 +157,51 @@ def test_jobs_queue_run_in_order_and_a_queued_job_can_be_cancelled(tmp_path, mon
     assert [api.RETIMES[i]["state"] for i in (a, b, c)] == ["done", "cancelled", "done"]
     assert cleaned == ["b"]  # the worker skipped it and still cleaned up
     assert api.RETIMES[a]["ended"] <= api.RETIMES[c]["began"]  # strictly one at a time
+
+
+def test_upload_keeps_an_existing_file_unless_replace(tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "ROOT", tmp_path)
+    one = b"1\n00:00:01,000 --> 00:00:02,000\nmerhaba\n\n"
+    two = b"1\n00:00:01,000 --> 00:00:02,000\ngule gule\n\n"
+    assert api._store_srt("ep", "tr", one) == "uploads/ep"
+    with pytest.raises(HTTPException) as e:
+        api._store_srt("ep", "tr", two)
+    assert e.value.status_code == 409 and "merhaba" in (tmp_path / "uploads/ep.tr.srt").read_text()
+    api._store_srt("ep", "tr", two, replace=True)
+    assert "gule gule" in (tmp_path / "uploads/ep.tr.srt").read_text()
+
+
+def test_retime_keeps_the_existing_episode_and_names_the_copy_retimed(tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "ROOT", tmp_path)
+    (tmp_path / "uploads").mkdir()
+    assert api._retimed_stem("ep", False) == "ep"
+    (tmp_path / "uploads/ep.tr.srt").write_text("x")
+    assert api._retimed_stem("ep", False) == "ep.retimed" and api._retimed_stem("ep", True) == "ep"
+
+
+def test_job_step_is_skipped_as_keep_when_its_output_exists(tmp_path, monkeypatch):
+    import sys
+
+    monkeypatch.setattr(api, "ROOT", tmp_path)
+    monkeypatch.setattr(api, "RETIMES", {})
+    out = tmp_path / "out.srt"
+    out.write_text("mine")
+    writes = [sys.executable, "-c", f"open({str(out)!r}, 'w').write('machine')", "x"]
+    job = api.RETIMES["j"] = {"state": "running", "log": []}
+    api._run_job(job, [("Translating", writes, out)], lambda: None, jid="j")
+    assert out.read_text() == "mine" and job["state"] == "done" and "KEEP: out.srt already exists" in job["log"]
+    api._run_job(job, [("Translating", writes, None)], lambda: None, jid="j")  # replace requested: no keep path
+    assert out.read_text() == "machine"
+
+
+def test_editor_save_is_refused_while_a_job_works_on_the_episode(tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "ROOT", tmp_path)
+    (tmp_path / "uploads").mkdir()
+    for lang in ("tr", "en"):
+        (tmp_path / f"uploads/ep.{lang}.srt").write_text("1\n00:00:01,000 --> 00:00:02,000\nx\n\n")
+    monkeypatch.setattr(api, "RETIMES", {"j": {"state": "running", "ep": "uploads/ep", "log": []}})
+    with pytest.raises(HTTPException) as e:
+        api.save_cue(0, "uploads/ep", api.CueEdit(en="hello"))
+    assert e.value.status_code == 409
+    api.RETIMES["j"]["state"] = "done"
+    assert api.save_cue(0, "uploads/ep", api.CueEdit(en="hello"))["en"] == "hello"
