@@ -205,3 +205,18 @@ def test_editor_save_is_refused_while_a_job_works_on_the_episode(tmp_path, monke
     assert e.value.status_code == 409
     api.RETIMES["j"]["state"] = "done"
     assert api.save_cue(0, "uploads/ep", api.CueEdit(en="hello"))["en"] == "hello"
+
+
+def test_save_cue_mirrors_to_the_video_folder(root, tmp_path, monkeypatch):
+    media = tmp_path / "media"
+    media.mkdir()
+    video = media / "ep.mkv"
+    video.write_bytes(b"x")
+    (media / "ep.en.hi.srt").write_text("human reference", encoding="utf-8")
+    monkeypatch.setattr(api, "_source", lambda ep: (video, False))
+    assert api.save_cue(0, "s02/a", api.CueEdit(en="Hi."))["media_error"] is None
+    assert [s.text for s in pysrt.open(str(media / "ep.en.srt"), encoding="utf-8")] == ["Hi.", "How are you?"]
+    assert (media / "ep.en.hi.srt").read_text(encoding="utf-8") == "human reference"
+    monkeypatch.setattr(api, "_source", lambda ep: (None, True))  # no video: the edit still lands in /output
+    assert "no video" in api.save_cue(1, "s02/a", api.CueEdit(en="Fine."))["media_error"]
+    assert pysrt.open(str(root / "s02/a.en.srt"), encoding="utf-8")[1].text == "Fine."

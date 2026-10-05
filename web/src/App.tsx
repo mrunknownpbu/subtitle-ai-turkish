@@ -133,7 +133,8 @@ export default function App() {
       });
       if (!r.ok) { setStatus("Save failed"); return; }
       setCues((cs) => cs.map((c) => (c.i === cue.i ? { ...c, en: draft } : c)));
-      setStatus(`Saved cue ${cue.i + 1}`);
+      const { media_error } = await r.json();
+      setStatus(media_error ? `Saved cue ${cue.i + 1}; not copied to media folder: ${media_error}` : `Saved cue ${cue.i + 1}`);
     }
     if (andNext) move(1);
   }, [cue, draft, ep, move]);

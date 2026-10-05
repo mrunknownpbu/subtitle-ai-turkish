@@ -1,7 +1,7 @@
 # Run from the repo root:  ./scripts/subai run --input-dir /data/media/drama/turkish/MyShow --recursive
 #
 # Container paths
-#   /data    host media library (read-only, reserved for media; override with MEDIA_DIR)
+#   /data    host media library (read-only; the api service mounts it writable to copy editor saves; override with MEDIA_DIR)
 #   /input   drop folder for direct uploads  -> ./workspace/input (read-only)
 #   /output  generated subtitles             -> ./workspace/output
 #   /logs    rotating logs                   -> ./workspace/logs
@@ -51,7 +51,7 @@ services:
     command: []
     volumes:
       - ../workspace/output:/output
-      - ${MEDIA_DIR:-/data}:/data:ro
+      - ${MEDIA_DIR:-/data}:/data  # writable: editor saves are copied next to the video as <name>.en.srt
       - ../web/dist:/web:ro
       # for jobs started from the web page (transcribe / translate / re-time run `subai` inside this container)
       - ../glossary:/glossary

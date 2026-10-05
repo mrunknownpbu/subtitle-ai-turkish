@@ -73,7 +73,20 @@ def save_cue(i: int, ep: str, edit: CueEdit) -> dict:
         shutil.copy2(en, orig)
     subs[i].text = edit.en
     write_subs_atomic(en, subs, allow_overwrite=True)
-    return {"i": i, "en": edit.en}
+    return {"i": i, "en": edit.en, "media_error": _mirror_to_media(ep, subs)}
+
+
+def _mirror_to_media(ep: str, subs: pysrt.SubRipFile) -> str | None:
+    """Also write the edited English subtitle as <video name>.en.srt beside the video, so the player library sees manual edits.
+    The edit is already safe in /output, so a failure here is reported, never raised."""
+    try:
+        video, _ = _source(ep)
+        if video is None:
+            return "no video chosen for this episode"
+        write_subs_atomic(video.with_name(video.stem + ".en.srt"), subs, allow_overwrite=True)
+    except Exception as exc:  # read-only mount, permissions, protected name
+        return str(exc)
+    return None
 
 
 VIDEO_EXT = {".mkv", ".mp4"}
