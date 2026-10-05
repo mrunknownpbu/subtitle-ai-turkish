@@ -220,3 +220,25 @@ def test_save_cue_mirrors_to_the_video_folder(root, tmp_path, monkeypatch):
     monkeypatch.setattr(api, "_source", lambda ep: (None, True))  # no video: the edit still lands in /output
     assert "no video" in api.save_cue(1, "s02/a", api.CueEdit(en="Fine."))["media_error"]
     assert pysrt.open(str(root / "s02/a.en.srt"), encoding="utf-8")[1].text == "Fine."
+
+
+def test_publish_copies_only_what_the_job_wrote(root, tmp_path, monkeypatch):
+    import time
+
+    media = tmp_path / "media"
+    media.mkdir()
+    (media / "a.mkv").write_bytes(b"x")
+    monkeypatch.setattr(api, "MEDIA", media)
+    write_srt(root / "s02" / "a.tr.srt", ["Yeni."])
+    write_srt(root / "s02" / "a.en.srt", ["New."])
+    (media / "a.en.srt").write_text("kept", encoding="utf-8")
+    old = time.time() - 100  # the English file predates the job: a step kept it
+    import os
+    os.utime(root / "s02" / "a.en.srt", (old, old))
+    api.RETIMES["j"] = {"began": time.time() - 10, "log": []}
+    api._publish("j", "s02/a", "a.mkv")
+    assert [s.text for s in pysrt.open(str(media / "a.tr.srt"), encoding="utf-8")] == ["Yeni."]
+    assert (media / "a.en.srt").read_text(encoding="utf-8") == "kept"
+    write_srt(root / "s02" / "a.retimed.tr.srt", ["R."])
+    api._publish("j", "s02/a.retimed", "a.mkv")
+    assert not (media / "a.retimed.tr.srt").exists()

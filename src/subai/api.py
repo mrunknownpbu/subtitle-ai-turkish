@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from subai.glossary import detect_series_id
-from subai.output import is_protected, write_subs_atomic
+from subai.output import is_protected, write_srt_atomic, write_subs_atomic
 from subai.pipeline.srtio import read_srt
 
 ROOT = Path(os.environ.get("SUBAI_OUTPUT", "/output")).resolve()
@@ -305,6 +305,23 @@ def _work() -> None:
         _run_job(job, steps, done, cleanup, jid, prepare)
 
 
+def _publish(jid: str, ep: str, video: str) -> None:
+    """Copy the Turkish/English subtitles this job wrote to <video name>.tr/.en.srt beside the video. Files a step kept
+    (older than the job), blank placeholders and <name>.retimed variants are not copied. A failure is logged, never fatal."""
+    job, v = RETIMES[jid], MEDIA / video
+    if Path(ep).name != v.stem:
+        return
+    for lang in ("tr", "en"):
+        f = ROOT / f"{ep}.{lang}.srt"
+        try:
+            if not f.is_file() or f.stat().st_mtime < job["began"] or not any(c.text.strip() for c in pysrt.open(str(f), encoding="utf-8")):
+                continue
+            write_srt_atomic(v.with_name(f"{v.stem}.{lang}.srt"), f.read_text(encoding="utf-8"), allow_overwrite=True)
+            job["log"] = (job["log"] + [f"Copied {lang}.srt to the media folder"])[-40:]
+        except Exception as exc:  # read-only mount, permissions, protected name
+            job["log"] = (job["log"] + [f"Not copied to the media folder ({lang}): {exc}"])[-40:]
+
+
 def _start_job(steps: list[tuple], ep: str, video: str, finish=lambda: None, cleanup=lambda: None,
                title: str = "", prepare=lambda: None) -> dict:
     """Queue a job; the single worker runs jobs in order. `prepare` runs just before its steps. Links the episode to its video when done."""
@@ -318,6 +335,7 @@ def _start_job(steps: list[tuple], ep: str, video: str, finish=lambda: None, cle
     def done() -> None:
         finish()
         (ROOT / f"{ep}.video").write_text(video)
+        _publish(jid, ep, video)
 
     QUEUE.put((jid, steps, done, cleanup, prepare))
     with _worker_lock:
