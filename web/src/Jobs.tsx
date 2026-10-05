@@ -3,11 +3,12 @@ import { Modal } from "./Pickers";
 
 export type JobRow = {
   id: string; state: string; log: string[]; ep: string; title: string; video: string;
-  started: number; ended: number | null; step: string;
+  started: number; began: number | null; ended: number | null; step: string;
 };
 
 // icon + word, never colour alone
 const STATE: Record<string, { icon: string; text: string; tone: string }> = {
+  queued: { icon: "…", text: "Queued", tone: "muted" },
   running: { icon: "◔", text: "Running", tone: "run" },
   done: { icon: "✓", text: "Done", tone: "ok" },
   failed: { icon: "✕", text: "Failed", tone: "bad" },
@@ -17,9 +18,9 @@ const STATE: Record<string, { icon: string; text: string; tone: string }> = {
 
 const TABS = [
   ["all", "All", () => true],
-  ["running", "Running", (j: JobRow) => j.state === "running"],
+  ["active", "Active", (j: JobRow) => j.state === "running" || j.state === "queued"],
   ["done", "Done", (j: JobRow) => j.state === "done"],
-  ["problems", "Problems", (j: JobRow) => !["running", "done"].includes(j.state)],
+  ["problems", "Problems", (j: JobRow) => !["queued", "running", "done"].includes(j.state)],
 ] as const;
 
 function ago(t: number) {
@@ -28,7 +29,8 @@ function ago(t: number) {
 }
 
 function took(j: JobRow) {
-  const s = Math.round((j.ended ?? Date.now() / 1000) - j.started);
+  if (j.state === "queued") return "waiting";
+  const s = Math.round((j.ended ?? Date.now() / 1000) - (j.began ?? j.started));
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
 }
 
@@ -38,7 +40,7 @@ export function JobsDialog({ jobs, onClose, onOpen, onClear, onChanged }: {
   const [tab, setTab] = useState<(typeof TABS)[number][0]>("all");
   const test = TABS.find((t) => t[0] === tab)![2];
   const shown = jobs.filter(test);
-  const finished = jobs.some((j) => j.state !== "running");
+  const finished = jobs.some((j) => !["queued", "running"].includes(j.state));
   return (
     <Modal title="Jobs" onClose={onClose}>
       <div className="tabs" role="group" aria-label="Filter jobs">
@@ -47,7 +49,7 @@ export function JobsDialog({ jobs, onClose, onOpen, onClear, onChanged }: {
         ))}
       </div>
       <div className="joblist">
-        {shown.length === 0 && <div className="empty">{jobs.length ? "No jobs in this view." : "No jobs yet. Start one from Tools."}</div>}
+        {shown.length === 0 && <div className="empty">{jobs.length ? "No jobs in this view." : "No jobs yet. Add one from Tools."}</div>}
         {shown.map((j) => {
           const st = STATE[j.state] ?? STATE.failed;
           return (
@@ -59,8 +61,8 @@ export function JobsDialog({ jobs, onClose, onOpen, onClear, onChanged }: {
               </div>
               <div className="actions">
                 {j.state === "done" && <button onClick={() => { onOpen(j.ep); onClose(); }}>Open episode</button>}
-                {j.state === "running" && (
-                  <button onClick={() => void fetch(`/api/retime-job-cancel?id=${j.id}`, { method: "POST" }).then(onChanged)}>Cancel job</button>
+                {(j.state === "running" || j.state === "queued") && (
+                  <button onClick={() => void fetch(`/api/retime-job-cancel?id=${j.id}`, { method: "POST" }).then(onChanged)}>{j.state === "queued" ? "Remove from queue" : "Cancel job"}</button>
                 )}
               </div>
               <details>

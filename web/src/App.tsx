@@ -59,7 +59,7 @@ export default function App() {
     fetch("/api/jobs").then((r) => r.json()).then((list: JobRow[]) => {
       const prev = lastStates.current;
       for (const j of list) { // announce a job that just finished
-        if (prev[j.id] === "running" && j.state !== "running") setStatus(`Job ${j.state}: ${j.title}`);
+        if ((prev[j.id] === "running" || prev[j.id] === "queued") && j.state !== "running" && j.state !== "queued") setStatus(`Job ${j.state}: ${j.title}`);
       }
       lastStates.current = Object.fromEntries(list.map((j) => [j.id, j.state]));
       setJobs(list);
@@ -70,7 +70,7 @@ export default function App() {
     const t = setInterval(loadJobs, 4000);
     return () => clearInterval(t);
   }, [loadJobs]);
-  const running = jobs.filter((j) => j.state === "running").length;
+  const running = jobs.filter((j) => j.state === "running" || j.state === "queued").length;
 
   useEffect(() => {
     fetch("/api/episodes").then((r) => r.json()).then((e: string[]) => { setEpisodes(e); if (e[0]) setEp(e[0]); })
@@ -238,10 +238,11 @@ export default function App() {
         const done = (e: string) => {
           fetch("/api/episodes").then((r) => r.json()).then((l: string[]) => { setEpisodes(l); setEp(e); setVer((v) => v + 1); setVkey((k) => k + 1); });
         };
+        const queued = () => { setStatus("Added to the queue (see Jobs)"); loadJobs(); };
         const close = () => setDialog("");
         return dialog === "upload" ? <UploadDialog existing={episodes} onClose={close} onDone={done} />
-          : dialog === "retime" ? <RetimeDialog defaultVideo={vfile.file} existing={episodes} onClose={close} onDone={done} />
-          : <ProcessDialog defaultVideo={vfile.file} onClose={close} onDone={done} />;
+          : dialog === "retime" ? <RetimeDialog defaultVideo={vfile.file} existing={episodes} onClose={close} onQueued={queued} />
+          : <ProcessDialog defaultVideo={vfile.file} onClose={close} onQueued={queued} />;
       })()}
       <Waveform video={videoRef} peaks={peaks.peaks} rate={peaks.rate} cues={cues} sel={sel} />
     </div>

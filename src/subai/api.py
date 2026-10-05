@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+import queue
 import threading
 import time
 import uuid
@@ -207,7 +208,9 @@ async def upload(request: Request, name: str, lang: str) -> dict:
 
 
 RETIMES: dict[str, dict] = {}
-_retime_lock = threading.Lock()  # one job at a time: a fresh transcript needs the GPU
+QUEUE: "queue.Queue[tuple]" = queue.Queue()  # jobs wait here; one worker runs them one at a time (the GPU is shared)
+_worker_lock = threading.Lock()
+_worker: threading.Thread | None = None
 
 
 PROCS: dict[str, subprocess.Popen] = {}
@@ -234,16 +237,17 @@ def _load_jobs() -> None:
             job = json.loads(f.read_text())
         except (OSError, ValueError):
             continue
-        if job.get("state") == "running":
+        if job.get("state") in ("running", "queued"):
             job.update(state="failed", ended=job.get("ended") or time.time(), log=(job.get("log", []) + ["interrupted by a server restart"])[-40:])
             f.write_text(json.dumps(job))
         RETIMES[f.stem] = job
 
 
-def _run_job(job: dict, steps: list[tuple[str, list[str]]], finish, cleanup=lambda: None, jid: str = "") -> None:
+def _run_job(job: dict, steps: list[tuple[str, list[str]]], finish, cleanup=lambda: None, jid: str = "", prepare=lambda: None) -> None:
     """Run `subai` CLI steps one after another (stop at the first failure), streaming their log into the job.
     Exit code 2 from `retime` means refused: not enough evidence, nothing written."""
     try:
+        prepare()
         for label, cmd in steps:
             job["log"] = (job["log"] + [f"== {label}"])[-40:]
             job["step"] = label
@@ -264,14 +268,26 @@ def _run_job(job: dict, steps: list[tuple[str, list[str]]], finish, cleanup=lamb
         job["ended"] = time.time()
         _save_job(jid)
         cleanup()
-        _retime_lock.release()
+
+
+def _work() -> None:
+    while True:
+        jid, steps, done, cleanup, prepare = QUEUE.get()
+        job = RETIMES.get(jid)
+        if job is None or job["state"] != "queued":  # cancelled while waiting
+            cleanup()
+            continue
+        job.update(state="running", began=time.time())
+        _save_job(jid)
+        _run_job(job, steps, done, cleanup, jid, prepare)
 
 
 def _start_job(steps: list[tuple[str, list[str]]], ep: str, video: str, finish=lambda: None, cleanup=lambda: None,
-               title: str = "") -> dict:
-    """Caller holds _retime_lock; the job thread releases it. Links the episode to its video when done."""
-    job = {"state": "running", "log": [], "ep": ep, "title": title or " + ".join(label for label, _ in steps),
-           "video": Path(video).name, "started": time.time(), "ended": None, "step": ""}
+               title: str = "", prepare=lambda: None) -> dict:
+    """Queue a job; the single worker runs jobs in order. `prepare` runs just before its steps. Links the episode to its video when done."""
+    global _worker
+    job = {"state": "queued", "log": [], "ep": ep, "title": title or " + ".join(label for label, _ in steps),
+           "video": Path(video).name, "started": time.time(), "began": None, "ended": None, "step": ""}
     jid = uuid.uuid4().hex
     RETIMES[jid] = job
     _save_job(jid)
@@ -280,16 +296,25 @@ def _start_job(steps: list[tuple[str, list[str]]], ep: str, video: str, finish=l
         finish()
         (ROOT / f"{ep}.video").write_text(video)
 
-    threading.Thread(target=_run_job, args=(job, steps, done, cleanup, jid), daemon=True).start()
+    QUEUE.put((jid, steps, done, cleanup, prepare))
+    with _worker_lock:
+        if _worker is None:
+            _worker = threading.Thread(target=_work, daemon=True)
+            _worker.start()
     return {"id": jid}
 
 
 @app.post("/api/retime-job-cancel")
 def cancel_job(id: str) -> dict:
+    job = RETIMES.get(id)
+    if job is not None and job["state"] == "queued":
+        job.update(state="cancelled", ended=time.time())  # the worker skips it and cleans up
+        _save_job(id)
+        return {"ok": True}
     proc = PROCS.get(id)
     if proc is None:
-        raise HTTPException(404, "no running job with this id")
-    RETIMES[id]["cancelled"] = True
+        raise HTTPException(404, "no running or queued job with this id")
+    job["cancelled"] = True  # type: ignore[index]
     proc.terminate()  # the job thread then sees a non-zero exit and marks it cancelled
     return {"ok": True}
 
@@ -327,9 +352,7 @@ async def retime(request: Request, video: str, name: str, src: str = "") -> dict
     if len(data) > MAX_SRT:
         raise HTTPException(413, "file too large for a subtitle")
     subs = _parse_srt(data)
-    if not _retime_lock.acquire(blocking=False):
-        raise HTTPException(409, "another re-time is running; wait for it to finish")
-    scratch = ROOT / "uploads" / f".{stem}.incoming.srt"
+    scratch = ROOT / "uploads" / f".{stem}.{uuid.uuid4().hex[:8]}.incoming.srt"  # unique: the same name may be queued twice
     try:
         scratch.parent.mkdir(exist_ok=True)
         subs.save(str(scratch), encoding="utf-8")
@@ -339,7 +362,6 @@ async def retime(request: Request, video: str, name: str, src: str = "") -> dict
                           finish=lambda: _ensure_pair(stem, "tr"), cleanup=lambda: scratch.unlink(missing_ok=True))
     except Exception:
         scratch.unlink(missing_ok=True)
-        _retime_lock.release()
         raise
 
 
@@ -383,9 +405,7 @@ async def process(request: Request, video: str, transcribe: bool = True, transla
     if translate and not transcribe and not data and not tr.is_file():
         raise HTTPException(400, "translating needs a Turkish SRT: upload one or choose it from the library")
     parsed = _parse_srt(data) if data else None
-    if not _retime_lock.acquire(blocking=False):
-        raise HTTPException(409, "another job is running; wait for it to finish")
-    scratch = ROOT / "uploads" / f".{stem}.incoming.srt"
+    scratch = ROOT / "uploads" / f".{stem}.{uuid.uuid4().hex[:8]}.incoming.srt"
     try:
         (ROOT / "uploads").mkdir(exist_ok=True)
         py = [sys.executable, "-m", "subai"]
@@ -397,16 +417,15 @@ async def process(request: Request, video: str, transcribe: bool = True, transla
         if transcribe:
             steps.append(("Transcribing audio", py + ["run", "-i", str(v), "-o", str(ROOT / "uploads"), "--model",
                                                       model or os.environ.get("SUBAI_MODEL", "large-v3"), "--overwrite"]))
-        elif parsed is not None and not retime:
-            parsed.save(str(tr), encoding="utf-8")
         if translate:
             sid = detect_series_id(v)
             steps.append(("Translating to English", py + ["translate", "-i", str(tr), "-o", str(en)] + (["--series", sid] if sid else [])))
+        # a supplied SRT used as is is written when the job starts, so a queued job never overwrites a running one's input
+        use_as_is = (lambda: parsed.save(str(tr), encoding="utf-8")) if parsed is not None and not retime and not transcribe else (lambda: None)
         return _start_job(steps, f"uploads/{stem}", str(v.relative_to(MEDIA)), finish=lambda: _ensure_pair(stem, "tr"),
-                          cleanup=lambda: scratch.unlink(missing_ok=True))
+                          cleanup=lambda: scratch.unlink(missing_ok=True), prepare=use_as_is)
     except Exception:
         scratch.unlink(missing_ok=True)
-        _retime_lock.release()
         raise
 
 

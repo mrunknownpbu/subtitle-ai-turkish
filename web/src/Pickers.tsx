@@ -124,39 +124,13 @@ export function UploadDialog({ existing, onClose, onDone }: { existing: string[]
   );
 }
 
-type Job = { id: string; state: string; log: string[]; ep: string };
-
-/** Start and poll a background job; when it succeeds, open its episode and close the dialog. */
-function useJob(onDone: (ep: string) => void, onClose: () => void) {
-  const [job, setJob] = useState<Job | null>(null);
-
-  useEffect(() => {
-    if (job?.state !== "running") return;
-    const t = setInterval(() => {
-      fetch(`/api/retime-job?id=${job.id}`).then((r) => r.json()).then((j: Omit<Job, "id">) => setJob({ ...j, id: job.id })).catch(() => {});
-    }, 2000);
-    return () => clearInterval(t);
-  }, [job?.id, job?.state]);
-
-  useEffect(() => { if (job?.state === "done") { onDone(job.ep); onClose(); } }, [job?.state]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  /** Pass the POST response that starts the job; returns an error message, or "" when it started. */
-  const begin = async (r: Response) => {
+/** Submit a job. It joins the queue and runs in order; the dialog closes and the Jobs list shows progress. */
+function useSubmit(onQueued: () => void, onClose: () => void) {
+  return async (r: Response) => {
     if (!r.ok) return await err(r);
-    setJob({ id: ((await r.json()) as { id: string }).id, state: "running", log: [], ep: "" });
+    onQueued(); onClose();
     return "";
   };
-  const failed = !!job && job.state !== "running" && job.state !== "done";
-  return { job, begin, failed };
-}
-
-function JobLog({ job }: { job: Job }) {
-  return (
-    <pre className="joblog" role="status" aria-live="polite">
-      {job.state === "running" && "Working…\n"}
-      {job.log.map((l) => l.trim()).join("\n")}
-    </pre>
-  );
 }
 
 type Source = { mode: "upload" | "library"; file?: File; lib: string };
@@ -205,14 +179,14 @@ function VideoChooser({ video, setVideo, disabled }: { video: string; setVideo: 
 }
 
 /** Re-time an original Turkish SRT (uploaded or from the library) onto a video's audio; the result opens as a new episode. */
-export function RetimeDialog({ defaultVideo, existing, onClose, onDone }: {
-  defaultVideo: string; existing: string[]; onClose: () => void; onDone: (ep: string) => void;
+export function RetimeDialog({ defaultVideo, existing, onClose, onQueued }: {
+  defaultVideo: string; existing: string[]; onClose: () => void; onQueued: () => void;
 }) {
   const [video, setVideo] = useState(defaultVideo);
   const [source, setSource] = useState<Source>({ mode: "upload", lib: "" });
   const [name, setName] = useState("");
   const [msg, setMsg] = useState("");
-  const { job, begin, failed } = useJob(onDone, onClose);
+  const begin = useSubmit(onQueued, onClose);
 
   const start = async () => {
     const n = name.trim();
@@ -226,20 +200,17 @@ export function RetimeDialog({ defaultVideo, existing, onClose, onDone }: {
   return (
     <Modal title="Re-time Turkish subtitle" onClose={onClose}>
       <div className="upload">
-        <VideoChooser video={video} setVideo={setVideo} disabled={!!job} />
-        <SourceChooser label="Original Turkish subtitle" startAt={video} source={source} setSource={setSource} disabled={!!job}
+        <VideoChooser video={video} setVideo={setVideo} disabled={false} />
+        <SourceChooser label="Original Turkish subtitle" startAt={video} source={source} setSource={setSource} disabled={false}
           onName={(n) => { if (!name) setName(stem(n)); }} />
         <label htmlFor="rt-name">Name for the re-timed episode</label>
-        <input id="rt-name" value={name} onChange={(e) => setName(e.target.value)} disabled={!!job} />
-        {job && <JobLog job={job} />}
+        <input id="rt-name" value={name} onChange={(e) => setName(e.target.value)} />
         <div className="hint" role="status">
-          {msg || (failed ? (job?.state === "refused" ? "Refused: nothing was written." : "Failed.")
-            : "Moves each cue to where it is spoken; the text is never changed. A video without a cached transcript is transcribed first (about 7 minutes on the GPU).")}
+          {msg || "Added to the queue; jobs run one at a time. Moves each cue to where it is spoken; the text is never changed. A video without a cached transcript is transcribed first (about 7 minutes on the GPU)."}
         </div>
         <div className="actions">
-          <button className="primary" onClick={() => void start()} disabled={!!job && !failed}>{failed ? "Try again" : "Re-time"}</button>
-          <button onClick={onClose}>{job?.state === "running" ? "Hide" : "Cancel"}</button>
-          {job?.state === "running" && <button onClick={() => void fetch(`/api/retime-job-cancel?id=${job.id}`, { method: "POST" })}>Cancel job</button>}
+          <button className="primary" onClick={() => void start()}>Add to queue</button>
+          <button onClick={onClose}>Cancel</button>
         </div>
       </div>
     </Modal>
@@ -247,7 +218,7 @@ export function RetimeDialog({ defaultVideo, existing, onClose, onDone }: {
 }
 
 /** Choose a library video and transcribe it (Turkish), translate (English), or both. The result opens as a new episode. */
-export function ProcessDialog({ defaultVideo, onClose, onDone }: { defaultVideo: string; onClose: () => void; onDone: (ep: string) => void }) {
+export function ProcessDialog({ defaultVideo, onClose, onQueued }: { defaultVideo: string; onClose: () => void; onQueued: () => void }) {
   const [video, setVideo] = useState(defaultVideo);
   const [from, setFrom] = useState<"transcribe" | "retime" | "as-is">("transcribe"); // where the Turkish text comes from
   const [translate, setTranslate] = useState(true);
@@ -255,7 +226,7 @@ export function ProcessDialog({ defaultVideo, onClose, onDone }: { defaultVideo:
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState("");
   const [msg, setMsg] = useState("");
-  const { job, begin, failed } = useJob(onDone, onClose);
+  const begin = useSubmit(onQueued, onClose);
   const transcribe = from === "transcribe", retime = from === "retime";
 
   useEffect(() => {
@@ -273,9 +244,9 @@ export function ProcessDialog({ defaultVideo, onClose, onDone }: { defaultVideo:
   return (
     <Modal title="Transcribe, re-time and translate" onClose={onClose}>
       <div className="upload">
-        <VideoChooser video={video} setVideo={setVideo} disabled={!!job} />
+        <VideoChooser video={video} setVideo={setVideo} disabled={false} />
         <label htmlFor="pr-from">Turkish text</label>
-        <select id="pr-from" value={from} disabled={!!job} onChange={(e) => setFrom(e.target.value as typeof from)}>
+        <select id="pr-from" value={from} disabled={false} onChange={(e) => setFrom(e.target.value as typeof from)}>
           <option value="transcribe">Transcribe the audio</option>
           <option value="retime">Re-time a Turkish subtitle onto this video</option>
           <option value="as-is">Use a Turkish subtitle as it is (or this video's earlier one)</option>
@@ -283,24 +254,22 @@ export function ProcessDialog({ defaultVideo, onClose, onDone }: { defaultVideo:
         {transcribe && (
           <>
             <label htmlFor="pr-model">Whisper model</label>
-            <select id="pr-model" value={model} disabled={!!job} onChange={(e) => setModel(e.target.value)}>
+            <select id="pr-model" value={model} disabled={false} onChange={(e) => setModel(e.target.value)}>
               {models.map((m) => <option key={m} value={m}>{base(m)}</option>)}
             </select>
           </>
         )}
         {!transcribe && (
           <SourceChooser label={retime ? "Turkish subtitle to re-time" : "Turkish subtitle (optional: otherwise this video's earlier transcription)"}
-            startAt={video} source={source} setSource={setSource} disabled={!!job} onName={() => {}} />
+            startAt={video} source={source} setSource={setSource} disabled={false} onName={() => {}} />
         )}
-        <label className="check"><input type="checkbox" checked={translate} disabled={!!job} onChange={(e) => setTranslate(e.target.checked)} /> Then translate Turkish to English</label>
-        {job && <JobLog job={job} />}
+        <label className="check"><input type="checkbox" checked={translate} disabled={false} onChange={(e) => setTranslate(e.target.checked)} /> Then translate Turkish to English</label>
         <div className="hint" role="status">
-          {msg || (failed ? "Failed. The log above shows the step." : "Transcribing takes about 7 minutes per episode on the GPU, re-timing about a minute, translating under a minute.")}
+          {msg || "Added to the queue; jobs run one at a time. Transcribing takes about 7 minutes per episode on the GPU, re-timing about a minute, translating under a minute."}
         </div>
         <div className="actions">
-          <button className="primary" onClick={() => void start()} disabled={!!job && !failed}>{failed ? "Try again" : "Start"}</button>
-          <button onClick={onClose}>{job?.state === "running" ? "Hide" : "Cancel"}</button>
-          {job?.state === "running" && <button onClick={() => void fetch(`/api/retime-job-cancel?id=${job.id}`, { method: "POST" })}>Cancel job</button>}
+          <button className="primary" onClick={() => void start()}>Add to queue</button>
+          <button onClick={onClose}>Cancel</button>
         </div>
       </div>
     </Modal>

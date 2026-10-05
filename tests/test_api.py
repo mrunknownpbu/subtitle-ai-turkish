@@ -133,3 +133,27 @@ def test_job_history_survives_restart_and_clears(tmp_path, monkeypatch):
     assert [j["id"] for j in api.jobs()] == ["b", "a"]  # newest first
     assert api.jobs_clear() == {"cleared": 2}
     assert api.jobs() == [] and not list((tmp_path / ".jobs").glob("*.json"))
+
+
+def test_jobs_queue_run_in_order_and_a_queued_job_can_be_cancelled(tmp_path, monkeypatch):
+    import sys
+    import time
+
+    monkeypatch.setattr(api, "ROOT", tmp_path)
+    monkeypatch.setattr(api, "RETIMES", {})
+    (tmp_path / "uploads").mkdir()
+    sleep = lambda s: [sys.executable, "-c", f"import time; time.sleep({s})", "x"]
+    cleaned = []
+    a = api._start_job([("slow", sleep(0.6))], "uploads/a", "a.mkv")["id"]
+    b = api._start_job([("never", sleep(0))], "uploads/b", "b.mkv", cleanup=lambda: cleaned.append("b"))["id"]
+    c = api._start_job([("last", sleep(0))], "uploads/c", "c.mkv")["id"]
+    assert api.RETIMES[b]["state"] == "queued"  # waits behind a, not rejected
+    api.cancel_job(b)
+    assert api.RETIMES[b]["state"] == "cancelled"
+    for _ in range(100):
+        if api.RETIMES[c]["state"] == "done":
+            break
+        time.sleep(0.1)
+    assert [api.RETIMES[i]["state"] for i in (a, b, c)] == ["done", "cancelled", "done"]
+    assert cleaned == ["b"]  # the worker skipped it and still cleaned up
+    assert api.RETIMES[a]["ended"] <= api.RETIMES[c]["began"]  # strictly one at a time
