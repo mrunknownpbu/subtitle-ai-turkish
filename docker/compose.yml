@@ -39,29 +39,11 @@ services:
   subai:
     <<: *subai
     environment:
-      OLLAMA_URL: http://ollama:11434
       SUBAI_MODEL: ${SUBAI_MODEL:-large-v3}
       HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
       HF_TOKEN: ${HF_TOKEN:-}
       TMDB_API_KEY: ${TMDB_API_KEY:-}
       TVDB_API_KEY: ${TVDB_API_KEY:-}
-
-  # Local LLM for translation. Start on demand (`docker compose up -d ollama`), stop it before GPU transcription.
-  ollama:
-    image: ollama/ollama
-    environment:
-      OLLAMA_MAX_LOADED_MODELS: "1"
-    volumes:
-      - subai-ollama:/root/.ollama
-    ports:
-      - "127.0.0.1:11434:11434"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 
   api:
     <<: *subai
@@ -71,10 +53,13 @@ services:
       - ../workspace/output:/output
       - ${MEDIA_DIR:-/data}:/data:ro
       - ../web/dist:/web:ro
+      # for jobs started from the web page (transcribe / translate / re-time run `subai` inside this container)
+      - ../glossary:/glossary
+      - ../workspace/models:/ft:ro
+      - ../workspace/logs:/logs
+      - subai-models:/models
     ports:
       - "8000:8000"
 
 volumes:
   subai-models:
-  subai-ollama:
-    external: true

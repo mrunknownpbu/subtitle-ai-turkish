@@ -1,96 +1,17 @@
-"""Turkish SRT -> English SRT via a local Ollama model. 1:1 per cue (merging/splitting is Format's job)."""
-import json
+"""Turkish SRT -> English SRT with opus-mt and deterministic Turkish handling. 1:1 per cue (merging/splitting is Format's job)."""
 import logging
-import os
 import re
 import textwrap
-import urllib.request
 from pathlib import Path
 
 import pysrt
 
 from subai.glossary import SeriesGlossary
+from subai.protect import (Entity, Glossary, bare_entity_translation, build_glossary, chunk_words, is_run_on,
+                           missing_entities, phrase_key, protect, qc_flag, recover_dropped_entities, restore,
+                           repair_corrupted_placeholders, split_dash_lines, split_sentences)
 
 log = logging.getLogger(__name__)
-
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
-PROMPT_VERSION = "v1"
-BATCH = 8
-CONTEXT = 3
-SCHEMA = {
-    "type": "object",
-    "properties": {"translations": {"type": "array", "items": {
-        "type": "object",
-        "properties": {"id": {"type": "integer"}, "en": {"type": "string"}},
-        "required": ["id", "en"]}}},
-    "required": ["translations"],
-}
-
-
-def system_prompt(sg: SeriesGlossary | None, target: str = "English", drafts: bool = False) -> str:
-    p = [f"You are a professional subtitle translator from Turkish to {target} for a TV series. "
-         "Translate each numbered cue into natural, concise spoken English that keeps the speaker's tone "
-         "(teasing, anger, warmth). Rules:",
-         "- Return exactly one translation per input id; never merge, split, skip or renumber cues.",
-         "- Cues are consecutive lines of dialogue and often continue each other (Turkish puts the verb last): "
-         "use 'previous' and 'next' for context but translate only 'cues'.",
-         "- Do not add dashes or quotes. Only if a source line starts with '- ' (a second speaker), keep it.",
-         "- Always translate every cue into English, including song lyrics; never copy Turkish text through.",
-         "- Turkish 'o' has no gender: pick he/she/they from context and the character list.",
-         "- Translate idioms and exclamations (Allah Allah, Maşallah, geçmiş olsun) by meaning, not literally.",
-         "- Keep proper names; never turn 'Bey'/'Hanım' into Mr/Mrs/Madam/Sir, keep them after the name (Ayfer Hanım); translate 'abi', 'abla' only when no name is given.",
-         "- Suffix -cığım/-ciğim/-cım (Eda'cığım) is affectionate: write 'dear Eda' or just 'Eda', never copy the suffix.",
-         "- 'Hala,' / 'Hala' used to address someone means 'Auntie' (not 'still'); likewise Teyze, Abla, Abi.",
-         "- Common idioms: kafayı yemek = go crazy; bayılmak = to love; inşallah = God willing / hopefully; yeğen = niece (girl) or nephew (boy).",
-         "- Keep ellipses and '!' / '?' where the source has them. Output only the translation, no notes."]
-    if drafts:
-        p.append("Each cue has a machine 'draft' translation. Keep it where it is correct and natural; "
-                 "fix wrong meaning, gender, names, idioms and missing or invented content from the Turkish.")
-    if sg:
-        t = sg.title
-        p.append(f"Series: {t.get('original')} ({t.get('english_release')}). {' '.join(str(sg.meta.get('synopsis', '')).split())}")
-        p.append("Characters: " + "; ".join(f"{c.name} ({c.gender})" + (f" - {c.note}" if c.note else "")
-                                            for c in sg.characters if c.role in ("lead", "main")))
-        terms = [f"{x['tr']} = {x['en']}" for x in sg.terms if x.get("policy") == "translate"]
-        keep = [x["tr"] for x in sg.terms if x.get("policy") == "keep"]
-        if terms:
-            p.append("Fixed translations: " + "; ".join(terms))
-        if keep:
-            p.append("Never translate: " + ", ".join(keep))
-    return "\n".join(p)
-
-
-def chat(model: str, system: str, user: str) -> str:
-    body = {"model": model, "stream": False, "think": False, "format": SCHEMA,
-            "options": {"temperature": 0, "num_ctx": 6144, "num_predict": 1024},  # cap runaway generations
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
-    req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", json.dumps(body).encode(),
-                                 {"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=180) as r:
-        return json.load(r)["message"]["content"]
-
-
-def _ask(model, system, ids, tr, en, tries=3, drafts=None):
-    """Translate cue indices `ids`; returns {idx: text}. Falls back to single cues, then raises."""
-    payload = {"previous": [{"tr": tr[i], "en": en[i]} for i in range(max(0, ids[0] - CONTEXT), ids[0]) if i in en],
-               "cues": [{"id": i, "tr": tr[i], **({"draft": drafts[i]} if drafts else {})} for i in ids],
-               "next": [tr[i] for i in range(ids[-1] + 1, min(len(tr), ids[-1] + 1 + CONTEXT))]}
-    for _ in range(tries):
-        try:
-            got = {int(t["id"]): t["en"].strip() for t in json.loads(chat(model, system, json.dumps(payload, ensure_ascii=False)))["translations"]}
-        except (ValueError, KeyError, TypeError) as exc:
-            log.warning("bad model JSON (%s), retrying", exc)
-            continue
-        if set(got) == set(ids) and all(got.values()):
-            return got
-        log.warning("id mismatch %s vs %s, retrying", sorted(got), ids)
-    if len(ids) > 1:
-        return {k: v for i in ids for k, v in _ask(model, system, [i], tr, en, tries, drafts).items()}
-    if drafts:
-        log.warning("model failed on cue %d, keeping the machine draft: %r", ids[0], tr[ids[0]])
-        return {ids[0]: drafts[ids[0]]}
-    raise RuntimeError(f"model failed to translate cue {ids[0]}: {tr[ids[0]]!r}")
-
 
 _REPEAT = re.compile(r"\b(\w+)(?:[\s,.!?…-]+\1\b){2,}", re.I)
 
@@ -124,51 +45,136 @@ def wrap(text: str, width: int = 42) -> str:
 OPUS_MODEL = "Helsinki-NLP/opus-mt-tc-big-tr-en"
 
 
-def opus_draft(tr: list[str]) -> list[str]:
-    """One cue -> one English draft with opus-mt (0.4 GB, GPU, ~25 s per episode); frees the GPU after."""
-    import torch
-    from transformers import MarianMTModel, MarianTokenizer
+class Translator:
+    """opus-mt-tc-big-tr-en on the GPU: fp16, beam 2, longest-first batches of 32, OOM halves the batch."""
 
-    tok = MarianTokenizer.from_pretrained(OPUS_MODEL)
-    mt = MarianMTModel.from_pretrained(OPUS_MODEL, torch_dtype=torch.float16).cuda().eval()
-    out: list[str] = []
-    for i in range(0, len(tr), 16):
-        enc = tok([" ".join(t.split()) for t in tr[i:i + 16]], return_tensors="pt", padding=True).to("cuda")
-        out += tok.batch_decode(mt.generate(**enc, num_beams=2, max_new_tokens=128), skip_special_tokens=True)
-    del mt
-    torch.cuda.empty_cache()
-    return out
+    def __init__(self, name: str = OPUS_MODEL):
+        import torch
+        from transformers import MarianMTModel, MarianTokenizer
+
+        if not torch.cuda.is_available():
+            raise RuntimeError("opus-mt needs the GPU (nothing runs on the CPU here)")
+        self.torch = torch
+        self.tok = MarianTokenizer.from_pretrained(name)
+        self.mt = MarianMTModel.from_pretrained(name, torch_dtype=torch.float16).cuda().eval()
+
+    def __call__(self, texts: list[str], batch: int = 32) -> list[str]:
+        order = sorted(range(len(texts)), key=lambda i: -len(texts[i]))
+        out = [""] * len(texts)
+        for a in range(0, len(order), batch):
+            idx = order[a:a + batch]
+            for i, t in zip(idx, self._generate([texts[i] for i in idx])):
+                out[i] = t
+        return out
+
+    def _generate(self, xs: list[str]) -> list[str]:
+        try:
+            enc = self.tok(xs, return_tensors="pt", padding=True, truncation=True, max_length=512).to("cuda")
+            with self.torch.inference_mode():
+                ids = self.mt.generate(**enc, num_beams=2, max_new_tokens=256, no_repeat_ngram_size=4)
+            return self.tok.batch_decode(ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+        except self.torch.cuda.OutOfMemoryError:
+            if len(xs) == 1:
+                raise
+            self.torch.cuda.empty_cache()
+            h = len(xs) // 2
+            return self._generate(xs[:h]) + self._generate(xs[h:])
+
+    def close(self) -> None:
+        del self.mt
+        self.torch.cuda.empty_cache()
 
 
-def load_drafts(draft: str | Path | None, tr: list[str]) -> list[str] | None:
-    """draft: None/'none' = no draft, 'opus' = opus-mt, otherwise an English .srt with the same cues."""
-    if draft in (None, "none"):
-        return None
-    if draft == "opus":
-        return opus_draft(tr)
-    drafts = [d.text.replace("\n", " ") for d in pysrt.open(str(draft), encoding="utf-8")]
-    if len(drafts) < len(tr):
-        raise ValueError(f"draft has {len(drafts)} cues, source has {len(tr)}")
-    return drafts[:len(tr)]
+def build_protection(sg: SeriesGlossary | None) -> Glossary:
+    """Character names/aliases and glossary terms -> placeholder map. Character forms restore as written."""
+    ents: list[Entity] = []
+    for c in (sg.characters if sg else []):
+        ents += [Entity(f, [f]) for f in [c.name, c.name.split()[0], *c.aliases]]
+    for t in (sg.terms if sg else []):
+        ents.append(Entity(t["en"] if t.get("policy") == "translate" else t["tr"], [t["tr"]]))
+    return build_glossary(ents)
 
 
-def translate_srt(src: Path, dst: Path, model: str, sg: SeriesGlossary | None, limit: int | None = None,
-                  draft: str | Path | None = "opus") -> int:
+def build_phrase_map(lang: dict | None) -> dict[str, str]:
+    return {phrase_key(e["tr"]): e["en"] for e in (lang or {}).get("phrase_map") or []}
+
+
+def _phrase(s: str, en: str) -> str:
+    tail = s.rstrip()[-1:]
+    return en[:-1] + tail if tail in "!?" and en.endswith(".") else en
+
+
+def translate_cues(texts: list[str], translate_fn, g: Glossary, phrase_map: dict[str, str]) -> list[str]:
+    """One English text per Turkish text. Dash turns and sentences go through the model separately."""
+    layout = []  # per cue: (is_dash, [[sentence index, ...] per unit])
+    sents: list[str] = []
+    for t in texts:
+        lines = split_dash_lines(t)
+        units = lines if lines else [" ".join(t.split())]
+        idx = []
+        for u in units:
+            parts = split_sentences(u) or [u]
+            idx.append(list(range(len(sents), len(sents) + len(parts))))
+            sents += parts
+        layout.append((bool(lines), idx))
+    out = [""] * len(sents)
+    todo: list[int] = []
+    prot: dict[int, str] = {}
+    for i, s in enumerate(sents):
+        p = protect(s, g)
+        if phrase_key(s) in phrase_map:
+            out[i] = _phrase(s, phrase_map[phrase_key(s)])
+        elif (b := bare_entity_translation(p, g)) is not None:
+            out[i] = b
+        elif not re.search(r"\w", s):
+            out[i] = s
+        else:
+            todo.append(i)
+            prot[i] = p
+    raw = dict(zip(todo, translate_fn([prot[i] for i in todo]))) if todo else {}
+    runon = [i for i in todo if is_run_on(sents[i])]
+    if runon:  # a run-on goes in one call and gets garbled: retry in 6-word chunks and keep the better one
+        chunks = [chunk_words(prot[i]) for i in runon]
+        done = iter(translate_fn([c for cs in chunks for c in cs]))
+        for i, cs in zip(runon, chunks):
+            alt = " ".join(next(done) for _ in cs)
+            a = restore(repair_corrupted_placeholders(raw[i], prot[i]), g)
+            b = restore(repair_corrupted_placeholders(alt, prot[i]), g)
+            ma, mb = (missing_entities(prot[i], x, g) for x in (a, b))
+            if mb < ma or (mb == ma and len(a) < 0.25 * len(sents[i]) and len(b) > len(a)):
+                raw[i] = alt
+    for i in todo:
+        t = restore(repair_corrupted_placeholders(raw[i], prot[i]), g)
+        out[i] = recover_dropped_entities(prot[i], t, g)
+    res = []
+    for dash, units in layout:
+        lines = [" ".join(out[i] for i in u).strip() for u in units]
+        res.append("\n".join(f"- {x}" for x in lines) if dash else lines[0])
+    return res
+
+
+def translate_srt(src: Path, dst: Path, sg: SeriesGlossary | None, limit: int | None = None, *,
+                     translate_fn=None, phrase_map: dict[str, str] | None = None) -> int:
     subs = pysrt.open(str(src), encoding="utf-8")
     if limit:
         subs = subs[:limit]
     tr = [collapse_repeats(s.text) for s in subs]
-    en: dict[int, str] = {}
-    drafts = load_drafts(draft, tr)
-    system = system_prompt(sg, drafts=bool(drafts))
-    for a in range(0, len(tr), BATCH):
-        en.update(_ask(model, system, list(range(a, min(a + BATCH, len(tr)))), tr, en, drafts=drafts))
-        log.info("translated %d/%d", len(en), len(tr))
+    mt = None if translate_fn else Translator()
+    try:
+        en = translate_cues(tr, translate_fn or mt, build_protection(sg), phrase_map or {})
+    finally:
+        if mt:
+            mt.close()
     out = pysrt.SubRipFile()
+    flagged = 0
     for i, s in enumerate(subs):
         text = fix_honorifics(s.text, en[i])
         text = text if any(l.startswith("-") for l in s.text.split("\n")) else text.removeprefix("- ")
+        if why := qc_flag(tr[i], text):
+            flagged += 1
+            log.warning("cue %d flagged (%s): %r -> %r", i + 1, why, tr[i], text)
         out.append(pysrt.SubRipItem(index=i + 1, start=s.start, end=s.end, text=wrap(text)))
+    log.info("translated %d cues, %d flagged by QC (advisory)", len(tr), flagged)
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_name(dst.name + ".part")
     out.save(str(tmp), encoding="utf-8")

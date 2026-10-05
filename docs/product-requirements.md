@@ -43,7 +43,7 @@ Generate broadcast-quality subtitles for Turkish TV series: transcribe Turkish s
 - Output: Turkish transcript segments with confidence scores.
 
 ### FR3 Translation
-- Local LLM (served by Ollama/llama.cpp), context-aware translation (sliding window of previous/next lines + scene summary).
+- Local machine translation (opus-mt-tc-big-tr-en, in-process on the GPU) wrapped in deterministic Turkish handling: sentence and dash-turn splitting, glossary name protection, fixed phrases.
 - Uses series glossary and character sheet (names, relationships, speech register, gender).
 - Preserves proper nouns, handles idioms by meaning, keeps honorific policy configurable (keep / translate / drop).
 - Targets: English (v1), Malay, Indonesian (v1.1); pluggable.

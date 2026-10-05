@@ -6,6 +6,15 @@ import pysrt
 from subai.models import Cue
 
 
+def read_srt(data: bytes) -> pysrt.SubRipFile:
+    """Parse SRT bytes: UTF-8 (BOM allowed), else legacy Turkish cp1254."""
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = data.decode("cp1254", errors="replace")
+    return pysrt.from_string(text)
+
+
 def write_srt(cues: list[Cue], path: Path) -> None:
     subs = pysrt.SubRipFile()
     for i, c in enumerate(cues, 1):

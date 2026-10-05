@@ -128,3 +128,20 @@ asr_watchlist:
   - {heard: söremeyecektim, likely: "göremeyecektim / gösteremeyecektim / söylemeyecektim", note: "unstable across decoding settings; review manually"}
   - {heard: hâlâ, likely: "hala", note: "same word, caret spelling varies; normalize to 'hâlâ' (still) vs 'hala' (aunt) by context"}
   - {heard: "tatlın / tatlı / tatlım", likely: "tatlım (sweetie) vs tatlı (dessert/sweet)", note: "context decides"}
+
+# Whole-utterance translations that bypass the MT model (opus-mt invents continuations for bare one-word cues).
+# Matched on the full cue sentence, case-insensitive, trailing .!? ignored. Strings only: quote "yes"/"no"/"on"/"off".
+phrase_map:
+  - {tr: Peki, en: "Okay."}
+  - {tr: Tamam, en: "Okay."}
+  - {tr: Evet, en: "Yes."}
+  - {tr: Hayır, en: "No."}
+  - {tr: Bekle, en: "Wait."}
+  - {tr: Hadi, en: "Come on."}
+  - {tr: Haydi, en: "Come on."}
+  - {tr: Teşekkürler, en: "Thank you."}
+  - {tr: Teşekkür ederim, en: "Thank you."}
+  - {tr: Pardon, en: "Sorry."}
+  - {tr: Tabii, en: "Of course."}
+  - {tr: Tabii ki, en: "Of course."}
+  - {tr: Maalesef, en: "Unfortunately."}

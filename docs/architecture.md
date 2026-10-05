@@ -36,7 +36,7 @@ video/audio
 | Alignment | WhisperX / wav2vec2 | Accurate word timings |
 | VAD | Silero VAD | Cuts hallucination |
 | Diarization | pyannote.audio | Speaker turns |
-| Translation | Local LLM via Ollama / llama.cpp (candidates: Qwen, Gemma, Llama; quantized), NLLB-200 fallback; pluggable interface | Fully local, context-aware |
+| Translation | opus-mt-tc-big-tr-en (Marian, 0.4 GB, fp16) + protect.py (placeholders, phrase map) | Fully local, fast, no LLM service |
 | API | FastAPI | Typed, async |
 | Jobs | RQ + Redis (or in-process for CLI) | Simple resumable queue |
 | DB | SQLite (SQLAlchemy) → Postgres optional | Local-first |
@@ -57,7 +57,7 @@ subtitle-ai-turkish/
 │   ├── logs.py  doctor.py  models.py
 │   ├── pipeline/               # implemented: audio, transcribe, segmenter, srtio, runner
 │   │                           # planned: align, diarize, format, export
-│   └── translate/              # planned: base, ollama, llamacpp, nllb, prompts/, glossary
+│   ├── translate.py  protect.py  # opus-mt translator + deterministic Turkish text steps
 ├── tests/                      # unit, golden, e2e
 ├── web/                        # React review editor (planned)
 ├── eval/                       # WER, readability, translation eval sets (planned)
@@ -90,14 +90,11 @@ Cache key = hash(stage input + stage config + model/prompt version). Re-running 
 Merge words into sentence/turn units using punctuation and pauses (>400 ms) and speaker changes.
 
 ### Translation
-- Batches of ~20 segments with ±5 lines context on each side and a running scene summary.
-- Prompt injects: glossary, character sheet, target language style guide, honorific policy.
-- Structured JSON in/out (id → translation + flags); schema validated (use Ollama JSON-schema constrained output), retries on mismatch. Smaller local models need shorter batches (~10 segments).
-- Model is a config value; chosen by running `eval/translation_eval.py` over candidates.
-- GPU memory (RTX 3070, 8 GB): ASR and LLM run strictly sequentially; unload each model after its stage. Use `compute_type=int8_float16` for Whisper and Q4 7–9B LLMs. Keep context ≤ 4–8k tokens. Diarization/alignment also run alone.
-- System RAM is 14 GB: avoid loading several models in CPU memory at once; set Ollama `OLLAMA_MAX_LOADED_MODELS=1`.
-- Temperature low (≤0.3). Line count preserved 1:1 with segments; merging happens in Format.
-- Flags: `idiom`, `low_confidence`, `name_unknown`, `gender_ambiguous`, `too_long`.
+- opus-mt-tc-big-tr-en in-process (fp16, beam 2, batch 32), one cue in, one cue out; see `docs/translation.md`.
+- Deterministic steps in `protect.py`: dash-turn and sentence splitting, name/term placeholders from the series glossary, phrase map, run-on chunk retry, advisory QC.
+- GPU memory (RTX 3070, 8 GB): ASR and translation run in separate processes, strictly one at a time. Use `compute_type=int8_float16` for Whisper. Diarization/alignment also run alone.
+- System RAM is 14 GB: avoid loading several models in CPU memory at once.
+- Line count preserved 1:1 with segments; merging happens in Format.
 
 ### Formatting
 Constraint solver per segment: split on clause boundaries to satisfy ≤42 chars/line, ≤2 lines, CPS ≤17; extend end time into gaps up to limit; enforce min gap. Rules live in config, covered by golden tests.
@@ -117,11 +114,11 @@ Single-page editor: media player + waveform, virtualized cue table, side-by-side
 
 ## 9. Deployment
 - Run: `./scripts/subai <command>` (wraps `docker compose -f docker/compose.yml run --rm subai`).
-- Docker + NVIDIA Container Toolkit. `docker/compose.yml` services: `subai` (CLI/batch, run on demand) and `api` (FastAPI on 127.0.0.1). Mounts: media library read-only (`/data`), `./workspace` for input/output/logs, a named volume for the model cache. `ollama` (LLM translation, bound to 127.0.0.1, volume `subai-ollama`, one model loaded) is reached by `subai` over the compose network, never the internet.
+- Docker + NVIDIA Container Toolkit. `docker/compose.yml` services: `subai` (CLI/batch, run on demand) and `api` (FastAPI on 127.0.0.1). Mounts: media library read-only (`/data`), `./workspace` for input/output/logs, a named volume for the model cache.
 - No inbound network exposure by default (binds 127.0.0.1).
 
 ## 10. Security & Privacy
-- Fully local: no outbound network at runtime. Models fetched once, then run with `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1`; Ollama on 127.0.0.1.
+- Fully local: no outbound network at runtime. Models fetched once, then run with `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1`.
 - `HF_TOKEN` is needed only once to download gated pyannote weights; never stored in the repo.
 - Optional egress check in tests: fail if the pipeline opens non-loopback connections.
 - Uploaded file paths validated; ffmpeg invoked with argument lists, never shell strings.
@@ -153,7 +150,8 @@ Single-page editor: media player + waveform, virtualized cue table, side-by-side
 
 | 16 | Vocal separation (Demucs htdemucs) rejected | Whisper large-v3 is already robust to the show's music: content WER 14.63% original vs 14.80% vocals-only vs 15.82% blended |
 | 17 | QLoRA fine-tune on the series, labels = our transcript + reference corrections and punctuation | Held-out WER 14.47% -> 13.49%; commas 3.2 -> 7.9 per 100 words (reference 7.5); timing unchanged. See docs/finetuning.md |
-| 18 | Translation = opus-mt draft + Qwen3 8B edit (Ollama), 1:1 per cue, honorific post-fix | S01E05 chrF vs human English: Qwen alone 48.5, opus-mt 51.4, opus-mt + Qwen edit 51.7; Gemma 12B runs partly on CPU at 8 GB. See docs/translation.md |
+| 18 | ~~opus-mt draft + Qwen3 8B edit (Ollama)~~ superseded by 19 | S01E05 chrF 52.2 for the Qwen edit; see docs/translation.md |
+| 19 | Translation = opus-mt-tc-big-tr-en + deterministic Turkish handling, no LLM, 1:1 per cue, honorific post-fix | Same transcript, chrF vs human English: S01E05 52.5 (shipped Qwen edit 52.2), S02E01 53.1 (52.6). Removes the Ollama service and its VRAM conflict with Whisper; about 40 s per episode instead of ~14 min. Approach ported from the sibling project subtitle-ai |
 
 ## 13. Evaluation (eval/wer.py)
 Human Turkish hearing-impaired subtitles for S01E01-05 are used as reference, never as input.

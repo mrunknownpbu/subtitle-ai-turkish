@@ -1,22 +1,30 @@
 """Local review API: list episodes, read Turkish/English cues, save an edited English cue. Serves web/dist."""
 import json
 import os
+import re
 import shutil
 import subprocess
+import sys
 import threading
+import time
+import uuid
 from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 import pysrt
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from subai.glossary import detect_series_id
+from subai.pipeline.srtio import read_srt
+
 ROOT = Path(os.environ.get("SUBAI_OUTPUT", "/output")).resolve()
 MEDIA = Path(os.environ.get("SUBAI_MEDIA", "/data"))
 RATE, PEAKS_PER_S = 4000, 20
+MAX_SRT = 5_000_000
 WEB = Path(os.environ.get("SUBAI_WEB", "/web"))
 
 app = FastAPI(title="subai review")
@@ -66,21 +74,348 @@ def save_cue(i: int, ep: str, edit: CueEdit) -> dict:
     return {"i": i, "en": edit.en}
 
 
+VIDEO_EXT = {".mkv", ".mp4"}
+
+
 @lru_cache(maxsize=None)
+def _index() -> dict[str, Path]:
+    """File name (no extension) -> video path for the whole library; one walk, ~10 s for 76k files."""
+    return {p.stem: p for p in MEDIA.rglob("*") if p.suffix.lower() in VIDEO_EXT}
+
+
+@app.on_event("startup")
+def _warm_index() -> None:
+    _load_jobs()
+    threading.Thread(target=_index, daemon=True).start()
+
+
 def _media(name: str) -> Path | None:
-    for ext in ("mkv", "mp4"):
-        for p in MEDIA.rglob(f"{name}.{ext}"):
-            return p
-    return None
+    p = _index().get(name)
+    if p is None:
+        _index.cache_clear()  # library may have changed; don't remember a miss
+    return p
+
+
+def _under(base: Path, rel: str) -> Path:
+    p = (base / rel).resolve()
+    if not p.is_relative_to(base.resolve()):
+        raise HTTPException(400, "path outside the library")
+    return p
+
+
+def _source(ep: str) -> tuple[Path | None, bool]:
+    """The video for an episode: the user's choice (<ep>.video) if set, else a file named like the episode. -> (path, auto)"""
+    choice = (ROOT / f"{ep}.video")
+    if choice.is_file():
+        p = _under(MEDIA, choice.read_text().strip())
+        if p.is_file():
+            return p, False
+    if ep.startswith("uploads/"):  # uploaded subtitles have no matching file: the user picks the video
+        return None, True
+    return _media(Path(ep).name), True
 
 
 def _video(ep: str) -> Path:
     _pair(ep)
-    p = _media(Path(ep).name)
+    p, _ = _source(ep)
     if p is None:
-        _media.cache_clear()  # don't remember a miss
         raise HTTPException(404, "no video found for this episode")
     return p
+
+
+class VideoChoice(BaseModel):
+    file: str = ""  # path under the media library; "" = automatic match
+
+
+@app.get("/api/browse")
+def browse(path: str = "", kind: str = "video") -> dict:
+    d = _under(MEDIA, path)
+    if not d.is_dir():
+        raise HTTPException(404, "folder not found")
+    exts = {".srt"} if kind == "srt" else VIDEO_EXT
+    kids = sorted((p for p in d.iterdir() if not p.name.startswith(".")), key=lambda p: p.name.lower())
+    return {"path": path, "dirs": [p.name for p in kids if p.is_dir()],
+            "files": [p.name for p in kids if p.is_file() and p.suffix.lower() in exts]}
+
+
+@app.get("/api/video-choice")
+def video_choice(ep: str) -> dict:
+    _pair(ep)
+    p, auto = _source(ep)
+    return {"file": str(p.relative_to(MEDIA)) if p else "", "auto": auto}
+
+
+@app.put("/api/video-choice")
+def set_video_choice(ep: str, c: VideoChoice) -> dict:
+    _pair(ep)
+    if c.file:
+        p = _under(MEDIA, c.file)
+        if not p.is_file() or p.suffix.lower() not in VIDEO_EXT:
+            raise HTTPException(400, "not a video file")
+        (ROOT / f"{ep}.video").write_text(c.file)
+    else:
+        (ROOT / f"{ep}.video").unlink(missing_ok=True)
+    for s in (".web.mp4", ".peaks.json"):  # derived from the old video
+        (ROOT / f"{ep}{s}").unlink(missing_ok=True)
+    return video_choice(ep)
+
+
+def _store_srt(name: str, lang: str, data: bytes) -> str:
+    """Save an uploaded SRT as uploads/<name>.<lang>.srt; the other language gets a blank copy with the same timings."""
+    if lang not in ("tr", "en"):
+        raise HTTPException(400, "lang must be tr or en")
+    stem = _safe_stem(name)
+    subs = _parse_srt(data)
+    d = ROOT / "uploads"
+    d.mkdir(exist_ok=True)
+    subs.save(str(d / f"{stem}.{lang}.srt"), encoding="utf-8")
+    _ensure_pair(stem, lang)
+    return f"uploads/{stem}"
+
+
+def _safe_stem(name: str) -> str:
+    stem = re.sub(r"[^\w .()\-]", "_", Path(name).stem).strip(" .")[:100]
+    if not stem:
+        raise HTTPException(400, "name required")
+    return stem
+
+
+def _parse_srt(data: bytes) -> pysrt.SubRipFile:
+    subs = read_srt(data)
+    if not len(subs):
+        raise HTTPException(400, "no subtitle cues found in this file")
+    return subs
+
+
+def _ensure_pair(stem: str, lang: str) -> None:
+    """uploads/<stem>.<lang>.srt exists; give the other language a blank copy with the same timings if it has none."""
+    d = ROOT / "uploads"
+    other = d / f"{stem}.{'en' if lang == 'tr' else 'tr'}.srt"
+    if not other.exists():
+        subs = pysrt.open(str(d / f"{stem}.{lang}.srt"), encoding="utf-8")
+        for s in subs:
+            s.text = ""
+        subs.save(str(other), encoding="utf-8")
+
+
+@app.post("/api/upload")
+async def upload(request: Request, name: str, lang: str) -> dict:
+    data = await request.body()
+    if len(data) > MAX_SRT:
+        raise HTTPException(413, "file too large for a subtitle")
+    return {"ep": _store_srt(name, lang, data)}
+
+
+RETIMES: dict[str, dict] = {}
+_retime_lock = threading.Lock()  # one job at a time: a fresh transcript needs the GPU
+
+
+PROCS: dict[str, subprocess.Popen] = {}
+MAX_JOBS = 50  # history kept on disk and listed
+
+
+def _save_job(jid: str) -> None:
+    """Persist a job as <output>/.jobs/<id>.json so history survives a restart; drop the oldest beyond MAX_JOBS."""
+    d = ROOT / ".jobs"
+    try:
+        d.mkdir(exist_ok=True)
+        (d / f"{jid}.json").write_text(json.dumps(RETIMES[jid]))
+        for old in sorted(d.glob("*.json"), key=lambda f: f.stat().st_mtime)[:-MAX_JOBS]:
+            RETIMES.pop(old.stem, None)
+            old.unlink(missing_ok=True)
+    except OSError:
+        pass  # history is a convenience: never fail a job over it
+
+
+def _load_jobs() -> None:
+    """A job still 'running' on disk belonged to a process that died with the server."""
+    for f in sorted((ROOT / ".jobs").glob("*.json")) if (ROOT / ".jobs").is_dir() else []:
+        try:
+            job = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if job.get("state") == "running":
+            job.update(state="failed", ended=job.get("ended") or time.time(), log=(job.get("log", []) + ["interrupted by a server restart"])[-40:])
+            f.write_text(json.dumps(job))
+        RETIMES[f.stem] = job
+
+
+def _run_job(job: dict, steps: list[tuple[str, list[str]]], finish, cleanup=lambda: None, jid: str = "") -> None:
+    """Run `subai` CLI steps one after another (stop at the first failure), streaming their log into the job.
+    Exit code 2 from `retime` means refused: not enough evidence, nothing written."""
+    try:
+        for label, cmd in steps:
+            job["log"] = (job["log"] + [f"== {label}"])[-40:]
+            job["step"] = label
+            proc = PROCS[jid] = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in proc.stdout:  # type: ignore[union-attr]
+                job["log"] = (job["log"] + [line.rstrip().split(" ", 2)[-1]])[-40:]
+            rc = proc.wait()
+            if rc:
+                job["state"] = "cancelled" if job.get("cancelled") else "refused" if rc == 2 and cmd[3] == "retime" else "failed"
+                return
+        finish()
+        job["state"] = "done"
+    except Exception as exc:  # report, never leave the job "running" forever
+        job["log"].append(str(exc))
+        job["state"] = "failed"
+    finally:
+        PROCS.pop(jid, None)
+        job["ended"] = time.time()
+        _save_job(jid)
+        cleanup()
+        _retime_lock.release()
+
+
+def _start_job(steps: list[tuple[str, list[str]]], ep: str, video: str, finish=lambda: None, cleanup=lambda: None,
+               title: str = "") -> dict:
+    """Caller holds _retime_lock; the job thread releases it. Links the episode to its video when done."""
+    job = {"state": "running", "log": [], "ep": ep, "title": title or " + ".join(label for label, _ in steps),
+           "video": Path(video).name, "started": time.time(), "ended": None, "step": ""}
+    jid = uuid.uuid4().hex
+    RETIMES[jid] = job
+    _save_job(jid)
+
+    def done() -> None:
+        finish()
+        (ROOT / f"{ep}.video").write_text(video)
+
+    threading.Thread(target=_run_job, args=(job, steps, done, cleanup, jid), daemon=True).start()
+    return {"id": jid}
+
+
+@app.post("/api/retime-job-cancel")
+def cancel_job(id: str) -> dict:
+    proc = PROCS.get(id)
+    if proc is None:
+        raise HTTPException(404, "no running job with this id")
+    RETIMES[id]["cancelled"] = True
+    proc.terminate()  # the job thread then sees a non-zero exit and marks it cancelled
+    return {"ok": True}
+
+
+@app.get("/api/jobs")
+def jobs() -> list[dict]:
+    """Job history, newest first (running jobs included)."""
+    return [{"id": i, **j} for i, j in sorted(RETIMES.items(), key=lambda kv: -kv[1].get("started", 0))]
+
+
+@app.post("/api/jobs-clear")
+def jobs_clear() -> dict:
+    """Forget every finished job."""
+    gone = [i for i, j in RETIMES.items() if j["state"] != "running"]
+    for i in gone:
+        RETIMES.pop(i)
+        (ROOT / ".jobs" / f"{i}.json").unlink(missing_ok=True)
+    return {"cleared": len(gone)}
+
+
+@app.post("/api/retime")
+async def retime(request: Request, video: str, name: str, src: str = "") -> dict:
+    """Re-time a Turkish SRT (request body, or `src` under the media library) onto `video`'s audio and open it as
+    the new episode uploads/<name>. Background job: poll /api/retime-job."""
+    v = _under(MEDIA, video)
+    if not v.is_file() or v.suffix.lower() not in VIDEO_EXT:
+        raise HTTPException(400, "not a video file")
+    stem = _safe_stem(name)
+    data = await request.body()
+    if not data:
+        s = _under(MEDIA, src) if src else None
+        if s is None or not s.is_file() or s.suffix.lower() != ".srt":
+            raise HTTPException(400, "send an SRT file or choose one from the library")
+        data = s.read_bytes()
+    if len(data) > MAX_SRT:
+        raise HTTPException(413, "file too large for a subtitle")
+    subs = _parse_srt(data)
+    if not _retime_lock.acquire(blocking=False):
+        raise HTTPException(409, "another re-time is running; wait for it to finish")
+    scratch = ROOT / "uploads" / f".{stem}.incoming.srt"
+    try:
+        scratch.parent.mkdir(exist_ok=True)
+        subs.save(str(scratch), encoding="utf-8")
+        cmd = [sys.executable, "-m", "subai", "retime", "-i", str(scratch), "--video", str(v),
+               "-o", str(ROOT / "uploads" / f"{stem}.tr.srt"), "--search-root", str(ROOT)]
+        return _start_job([("Re-timing", cmd)], f"uploads/{stem}", str(v.relative_to(MEDIA)),
+                          finish=lambda: _ensure_pair(stem, "tr"), cleanup=lambda: scratch.unlink(missing_ok=True))
+    except Exception:
+        scratch.unlink(missing_ok=True)
+        _retime_lock.release()
+        raise
+
+
+FT = Path(os.environ.get("SUBAI_FT", "/ft"))
+
+
+@app.get("/api/models")
+def models() -> dict:
+    """Whisper models offered for transcription: fine-tuned ones in /ft first, then the stock large-v3."""
+    tuned = sorted(str(p) for p in FT.glob("*") if p.is_dir()) if FT.is_dir() else []
+    return {"models": tuned[::-1] + [os.environ.get("SUBAI_MODEL", "large-v3")]}
+
+
+@app.post("/api/process")
+async def process(request: Request, video: str, transcribe: bool = True, translate: bool = True,
+                  src: str = "", model: str = "", retime: bool = False) -> dict:
+    """Transcribe a library video to Turkish, re-time a supplied Turkish SRT onto its audio, and/or translate to English,
+    as the episode uploads/<video name>. Steps run in that order. Re-timing needs an SRT (request body or `src`) and
+    replaces transcription as the source of the Turkish text. Translate-only needs an SRT or the episode's earlier one."""
+    v = _under(MEDIA, video)
+    if not v.is_file() or v.suffix.lower() not in VIDEO_EXT:
+        raise HTTPException(400, "not a video file")
+    if not (transcribe or translate or retime):
+        raise HTTPException(400, "choose at least one step")
+    if retime and transcribe:
+        raise HTTPException(400, "re-timing moves an existing subtitle; a fresh transcription is already timed to the audio")
+    stem = v.stem
+    tr, en = ROOT / "uploads" / f"{stem}.tr.srt", ROOT / "uploads" / f"{stem}.en.srt"
+    if model and model != os.environ.get("SUBAI_MODEL", "large-v3") and not _under(FT, model.removeprefix(str(FT) + "/")).is_dir():
+        raise HTTPException(400, "unknown model")
+    data = await request.body()
+    if not data and src:
+        s = _under(MEDIA, src)
+        if not s.is_file() or s.suffix.lower() != ".srt":
+            raise HTTPException(400, "src is not an .srt file")
+        data = s.read_bytes()
+    if len(data) > MAX_SRT:
+        raise HTTPException(413, "file too large for a subtitle")
+    if retime and not data:
+        raise HTTPException(400, "re-timing needs a Turkish SRT: upload one or choose it from the library")
+    if translate and not transcribe and not data and not tr.is_file():
+        raise HTTPException(400, "translating needs a Turkish SRT: upload one or choose it from the library")
+    parsed = _parse_srt(data) if data else None
+    if not _retime_lock.acquire(blocking=False):
+        raise HTTPException(409, "another job is running; wait for it to finish")
+    scratch = ROOT / "uploads" / f".{stem}.incoming.srt"
+    try:
+        (ROOT / "uploads").mkdir(exist_ok=True)
+        py = [sys.executable, "-m", "subai"]
+        steps = []
+        if retime:
+            parsed.save(str(scratch), encoding="utf-8")  # type: ignore[union-attr]
+            steps.append(("Re-timing", py + ["retime", "-i", str(scratch), "--video", str(v), "-o", str(tr),
+                                             "--search-root", str(ROOT)]))
+        if transcribe:
+            steps.append(("Transcribing audio", py + ["run", "-i", str(v), "-o", str(ROOT / "uploads"), "--model",
+                                                      model or os.environ.get("SUBAI_MODEL", "large-v3"), "--overwrite"]))
+        elif parsed is not None and not retime:
+            parsed.save(str(tr), encoding="utf-8")
+        if translate:
+            sid = detect_series_id(v)
+            steps.append(("Translating to English", py + ["translate", "-i", str(tr), "-o", str(en)] + (["--series", sid] if sid else [])))
+        return _start_job(steps, f"uploads/{stem}", str(v.relative_to(MEDIA)), finish=lambda: _ensure_pair(stem, "tr"),
+                          cleanup=lambda: scratch.unlink(missing_ok=True))
+    except Exception:
+        scratch.unlink(missing_ok=True)
+        _retime_lock.release()
+        raise
+
+
+@app.get("/api/retime-job")
+def retime_job(id: str) -> dict:
+    job = RETIMES.get(id)
+    if job is None:
+        raise HTTPException(404, "unknown job")
+    return job
 
 
 _remux_lock = threading.Lock()

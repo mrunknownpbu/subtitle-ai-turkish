@@ -82,3 +82,19 @@ def test_bad_language_entry_rejected(tmp_path):
     (tmp_path / "language" / "tr.yaml").write_text("formulae:\n  - {tr: x}\n", encoding="utf-8")
     with pytest.raises(GlossaryError):
         load_language(tmp_path, "tr")
+
+
+@pytest.mark.parametrize("body", [
+    "phrase_map:\n  - {tr: Peki}\n",
+    "phrase_map:\n  - {tr: Peki, en: true}\n",  # YAML bare yes/no/true is a boolean, not a string
+    "phrase_map:\n  - {tr: Peki, en: 'Okay.'}\n  - {tr: peki!, en: 'Fine.'}\n",  # same key, different output
+])
+def test_bad_phrase_map_rejected(tmp_path, body):
+    (tmp_path / "language").mkdir()
+    (tmp_path / "language" / "tr.yaml").write_text(body, encoding="utf-8")
+    with pytest.raises(GlossaryError, match="phrase_map"):
+        load_language(tmp_path, "tr")
+
+
+def test_shipped_phrase_map_loads():
+    assert load_language(GLOSSARY, "tr")["phrase_map"]

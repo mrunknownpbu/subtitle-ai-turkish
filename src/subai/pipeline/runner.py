@@ -1,4 +1,5 @@
 """Single-file and batch processing."""
+import glob
 import json
 import logging
 import tempfile
@@ -6,15 +7,18 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from pysrt import SubRipTime
+
 from subai.glossary import apply_corrections, is_hallucination
-from subai.models import Word
+from subai.models import Cue, Word
+from subai.retime import RetimeReport, retime
 from subai.pipeline.dialogue import assign_speakers, merge_dialogue
 from subai.pipeline.diarize import MODEL as DIAR_MODEL
 from subai.pipeline.diarize import DiarizationError, run_diarization
 from subai.pipeline.style import apply_tone
 from subai.pipeline.audio import MEDIA_EXT, MediaError, extract_audio
 from subai.pipeline.segmenter import build_cues
-from subai.pipeline.srtio import write_srt
+from subai.pipeline.srtio import read_srt, write_srt
 from subai.pipeline.transcribe import Transcriber, TranscriptionError
 
 log = logging.getLogger(__name__)
@@ -80,6 +84,34 @@ def _diarization(src: Path, out_path: Path, track: int | None) -> list[list] | N
     return segments
 
 
+def get_words(src: Path, cache_dir: Path, tr: Transcriber, track: int | None,
+              force: bool = False) -> tuple[list[Word], float]:
+    """ASR words of a video: from <cache_dir>/<name>.words.json when it matches the file and the
+    transcriber settings, else transcribe and cache them. -> (words, duration seconds)"""
+    cache = cache_dir / f"{src.stem}.words.json"
+    key = _cache_key(src, tr, track)
+    if cache.exists() and not force:
+        try:
+            data = json.loads(cache.read_text(encoding="utf-8"))
+            if data.get("key") == key:
+                words = [Word(*w) for w in data["words"]]
+                log.info("Using cached transcription (%d words); --retranscribe to redo", len(words))
+                return words, float(data["duration"])
+        except (OSError, ValueError, KeyError, TypeError):
+            log.warning("Ignoring unreadable cache %s", cache)
+    with tempfile.TemporaryDirectory(prefix="subai_") as tmp:
+        wav = Path(tmp) / "audio.wav"
+        duration = extract_audio(src, wav, track)
+        log.info("Audio extracted (%.1f min)", duration / 60)
+        words = tr.transcribe(wav, duration)
+    if words:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps({"key": key, "duration": duration,
+                                     "words": [[w.text, w.start, w.end] for w in words]},
+                                    ensure_ascii=False), encoding="utf-8")
+    return words, duration
+
+
 def process_file(src: Path, out_path: Path, tr: Transcriber, track: int | None,
                  corrections: list[dict] | None = None, force_asr: bool = False,
                  hallucinations: list[str] | None = None, tone: dict | None = None,
@@ -87,30 +119,7 @@ def process_file(src: Path, out_path: Path, tr: Transcriber, track: int | None,
     """ASR words are cached next to the output (.subai/<name>.words.json), so changes to
     segmentation, timing or glossary corrections re-run in seconds without re-transcribing."""
     t0 = time.time()
-    cache = out_path.parent / ".subai" / f"{src.stem}.words.json"
-    key = _cache_key(src, tr, track)
-    words: list[Word] | None = None
-    duration = 0.0
-    if cache.exists() and not force_asr:
-        try:
-            data = json.loads(cache.read_text(encoding="utf-8"))
-            if data.get("key") == key:
-                words = [Word(*w) for w in data["words"]]
-                duration = float(data["duration"])
-                log.info("Using cached transcription (%d words); --retranscribe to redo", len(words))
-        except (OSError, ValueError, KeyError, TypeError):
-            log.warning("Ignoring unreadable cache %s", cache)
-    if words is None:
-        with tempfile.TemporaryDirectory(prefix="subai_") as tmp:
-            wav = Path(tmp) / "audio.wav"
-            duration = extract_audio(src, wav, track)
-            log.info("Audio extracted (%.1f min)", duration / 60)
-            words = tr.transcribe(wav, duration)
-        if words:
-            cache.parent.mkdir(parents=True, exist_ok=True)
-            cache.write_text(json.dumps({"key": key, "duration": duration,
-                                         "words": [[w.text, w.start, w.end] for w in words]},
-                                        ensure_ascii=False), encoding="utf-8")
+    words, duration = get_words(src, out_path.parent / ".subai", tr, track, force_asr)
     if not words:
         raise TranscriptionError("no speech detected")
     if diarize:
@@ -142,6 +151,42 @@ def process_file(src: Path, out_path: Path, tr: Transcriber, track: int | None,
     rtf = duration / secs if secs else 0
     log.info("Wrote %s (%d cues, %.0fs, %.1fx realtime)", out_path, len(cues), secs, rtf)
     return Result(str(src), "ok", str(out_path), round(secs, 1), len(cues))
+
+
+def cached_words(stem: str, root: Path) -> list[Word] | None:
+    """Newest cached ASR words of the video called `stem` anywhere under `root`. Any ASR settings
+    will do: re-timing needs word times, not the best text."""
+    hits = sorted(root.glob(f"**/.subai/{glob.escape(stem)}.words.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for p in hits:
+        try:
+            return [Word(*w) for w in json.loads(p.read_text(encoding="utf-8"))["words"]]
+        except (OSError, ValueError, KeyError, TypeError):
+            log.warning("Ignoring unreadable cache %s", p)
+    return None
+
+
+def retime_file(video: Path, srt_in: Path, out_path: Path, make_transcriber, search_root: Path,
+                lang: str = "tr", track: int | None = None) -> tuple[RetimeReport, str]:
+    """Write srt_in with its cue times moved onto the video's audio (text untouched) to out_path.
+    Word times come from a cached transcript of the video, else the audio is transcribed first
+    (GPU, minutes); `make_transcriber` is only called then. Raises RetimeRefused. -> (report, "cache"|"fresh")"""
+    subs = read_srt(srt_in.read_bytes())
+    words, source = cached_words(video.stem, search_root), "cache"
+    if words is None:
+        source, tr = "fresh", make_transcriber()
+        try:
+            words, _ = get_words(video, out_path.parent / ".subai", tr, track)
+        finally:
+            tr.close()
+    cues = [Cue(s.start.ordinal / 1000, s.end.ordinal / 1000, s.text.replace("\n", " ")) for s in subs]
+    times, report = retime(cues, words, lang)
+    for item, (start, end) in zip(subs, times):
+        item.start, item.end = SubRipTime.from_ordinal(round(start * 1000)), SubRipTime.from_ordinal(round(end * 1000))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out_path.with_name(out_path.name + ".part")
+    subs.save(str(tmp), encoding="utf-8")
+    tmp.replace(out_path)
+    return report, source
 
 
 def run_batch(files: list[tuple[Path, Path]], out_dir: Path, tr: Transcriber,

@@ -5,4 +5,5 @@ fastapi
 uvicorn
 python-multipart
 pyyaml
-transformers>=4.44,<4.50  # opus-mt draft in `subai translate`
+transformers>=4.44,<4.50  # opus-mt in `subai translate`
+sentencepiece  # required by MarianTokenizer

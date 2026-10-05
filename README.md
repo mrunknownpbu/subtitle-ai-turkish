@@ -12,7 +12,7 @@ Fully local, AI-assisted subtitle generator for Turkish TV series. It transcribe
 ## Planned pipeline
 ```
 video/audio → ffmpeg → VAD → Whisper large-v3 (tr) → forced alignment
-  → (optional diarization) → segmentation → local LLM translation
+  → (optional diarization) → segmentation → opus-mt translation
   → subtitle formatting (readability rules) → SRT / VTT / ASS
 ```
 
@@ -25,7 +25,7 @@ Designed for an NVIDIA GPU with 8 GB VRAM (e.g. RTX 3070), 14 GB RAM and 6 cores
 | [product-requirements.md](docs/product-requirements.md) | Scope, requirements, quality targets, milestones |
 | [architecture.md](docs/architecture.md) | Pipeline stages, stack, data model, API |
 | [design-system.md](docs/design-system.md) | Review editor UI tokens and components |
-| [translation.md](docs/translation.md) | Turkish → English: opus-mt draft + Qwen3 edit, measurements, limits |
+| [translation.md](docs/translation.md) | Turkish → English: opus-mt + name protection, measurements, limits |
 | [finetuning.md](docs/finetuning.md) | QLoRA fine-tuning on the series: method, results, caveats |
 | [agent-guide.md](docs/agent-guide.md) | Conventions for AI coding agents, Turkish-specific rules |
 | [CLAUDE.md](CLAUDE.md) | Short project brief for Claude Code |

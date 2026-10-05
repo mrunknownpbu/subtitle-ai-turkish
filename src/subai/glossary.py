@@ -12,6 +12,8 @@ from pathlib import Path
 
 import yaml
 
+from subai.protect import phrase_key
+
 log = logging.getLogger(__name__)
 
 DEFAULT_DIR = Path(os.environ.get("SUBAI_GLOSSARY_DIR", "/glossary"))
@@ -125,6 +127,13 @@ def load_language(glossary_dir: Path, lang: str = "tr") -> dict:
         for i, e in enumerate(data.get(section, [])):
             if not e.get("tr") or not e.get("en"):
                 raise GlossaryError(f"{path}: {section}[{i}] needs 'tr' and 'en'")
+    seen: dict[str, str] = {}
+    for i, e in enumerate(data.get("phrase_map") or []):
+        if not all(isinstance(e.get(k), str) and e[k].strip() for k in ("tr", "en")):
+            raise GlossaryError(f"{path}: phrase_map[{i}] needs string 'tr' and 'en'")
+        key = phrase_key(e["tr"])
+        if seen.setdefault(key, e["en"]) != e["en"]:
+            raise GlossaryError(f"{path}: phrase_map[{i}] {e['tr']!r} repeats a key with a different translation")
     return data
 
 

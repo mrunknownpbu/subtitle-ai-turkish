@@ -109,22 +109,56 @@ def run(
 def translate(
     input: Path = typer.Option(..., "--input", "-i", help="Turkish .srt"),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Default: <input> with .tr.srt -> .en.srt"),
-    model: str = typer.Option(os.environ.get("SUBAI_LLM", "qwen3:8b"), "--model", help="Ollama model tag."),
     series: Optional[str] = typer.Option(None, "--series", help="Series glossary id, e.g. tvdb-383383."),
     glossary_dir: Path = typer.Option(DEFAULT_GLOSSARY_DIR, "--glossary-dir", envvar="SUBAI_GLOSSARY_DIR"),
     limit: Optional[int] = typer.Option(None, "--limit", help="Only the first N cues (for trials)."),
-    draft: str = typer.Option("opus", "--draft", help="First-pass English for the LLM to edit: opus (opus-mt, default), none, or an English .srt with the same cues."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
-    """Translate a Turkish SRT to English with a local Ollama model."""
-    from subai.glossary import load_series
-    from subai.translate import translate_srt
+    """Translate a Turkish SRT to English with opus-mt plus glossary name protection (GPU, no LLM)."""
+    from subai.glossary import GlossaryError, load_language, load_series
+    from subai.translate import build_phrase_map, translate_srt
 
     setup_logging(verbose)
     sg = load_series(glossary_dir, series) if series else None
     dst = output or input.with_name(input.name.replace(".tr.srt", ".en.srt") if ".tr.srt" in input.name else input.stem + ".en.srt")
-    n = translate_srt(input, dst, model, sg, limit, draft)
-    log.info("Wrote %s (%d cues, %s)", dst, n, model)
+    try:
+        phrases = build_phrase_map(load_language(glossary_dir, "tr"))
+    except (OSError, GlossaryError) as exc:
+        log.warning("no phrase map (%s)", exc)
+        phrases = {}
+    n = translate_srt(input, dst, sg, limit, phrase_map=phrases)
+    log.info("Wrote %s (%d cues)", dst, n)
+
+
+@app.command("retime")
+def retime_cmd(
+    input: Path = typer.Option(..., "--input", "-i", help="Turkish .srt with the right text but wrong times."),
+    video: Path = typer.Option(..., "--video", help="The video the subtitle belongs to."),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Default: <input name>.retimed.srt beside the input."),
+    lang: str = typer.Option("tr", "--lang", help="Subtitle language code."),
+    model: str = typer.Option(DEFAULT_MODEL, "--model", help="Whisper model, used only when the video has no cached transcript."),
+    search_root: Path = typer.Option(Path("/output"), "--search-root", envvar="SUBAI_OUTPUT_DIR",
+                                     help="Where cached transcripts (.subai/<video>.words.json) are looked up."),
+    audio_track: Optional[int] = typer.Option(None, "--audio-track", help="0-based audio stream index."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Move a subtitle's cues onto the video's audio (text is never changed). Exit 2 if the evidence is too thin."""
+    from subai.pipeline.runner import retime_file
+    from subai.pipeline.transcribe import Transcriber
+    from subai.retime import RetimeRefused
+
+    setup_logging(verbose)
+    dst = output or input.with_name(input.stem + ".retimed.srt")
+    try:
+        report, source = retime_file(video, input, dst, lambda: Transcriber(model=model, lang=lang), search_root, lang, audio_track)
+    except RetimeRefused as exc:
+        log.error("Refused, nothing written: %s", exc)
+        raise typer.Exit(2)
+    log.info("Transcript: %s. %d of %d cues anchored; %s; residual median %.2f s, p95 %.2f s",
+             source, report.anchored_cues, report.cues, report.method, report.residual_p50, report.residual_p95)
+    for p in report.pieces:
+        log.info("  %.0f-%.0f s: offset %+.2f s%s", p.t0, p.t1, p.offset0, f", drift {p.slope * 1000:+.1f} ms/s" if p.slope else "")
+    log.info("Wrote %s", dst)
 
 
 @app.command("download-model")
