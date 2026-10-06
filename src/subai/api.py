@@ -316,7 +316,8 @@ def _publish(jid: str, ep: str, video: str) -> None:
         try:
             if not f.is_file() or f.stat().st_mtime < job["began"] or not any(c.text.strip() for c in pysrt.open(str(f), encoding="utf-8")):
                 continue
-            write_srt_atomic(v.with_name(f"{v.stem}.{lang}.srt"), f.read_text(encoding="utf-8"), allow_overwrite=True)
+            with open(f, encoding="utf-8", newline="") as fh:  # newline="": keep the file's CRLF/LF as written
+                write_srt_atomic(v.with_name(f"{v.stem}.{lang}.srt"), fh.read(), allow_overwrite=True)
             job["log"] = (job["log"] + [f"Copied {lang}.srt to the media folder"])[-40:]
         except Exception as exc:  # read-only mount, permissions, protected name
             job["log"] = (job["log"] + [f"Not copied to the media folder ({lang}): {exc}"])[-40:]

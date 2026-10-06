@@ -230,6 +230,8 @@ def test_publish_copies_only_what_the_job_wrote(root, tmp_path, monkeypatch):
     (media / "a.mkv").write_bytes(b"x")
     monkeypatch.setattr(api, "MEDIA", media)
     write_srt(root / "s02" / "a.tr.srt", ["Yeni."])
+    tr = root / "s02" / "a.tr.srt"
+    tr.write_bytes(tr.read_bytes().replace(b"\n", b"\r\n"))  # retime writes CRLF; the copy must keep it
     write_srt(root / "s02" / "a.en.srt", ["New."])
     (media / "a.en.srt").write_text("kept", encoding="utf-8")
     old = time.time() - 100  # the English file predates the job: a step kept it
@@ -238,6 +240,7 @@ def test_publish_copies_only_what_the_job_wrote(root, tmp_path, monkeypatch):
     api.RETIMES["j"] = {"began": time.time() - 10, "log": []}
     api._publish("j", "s02/a", "a.mkv")
     assert [s.text for s in pysrt.open(str(media / "a.tr.srt"), encoding="utf-8")] == ["Yeni."]
+    assert (media / "a.tr.srt").read_bytes() == (root / "s02" / "a.tr.srt").read_bytes()
     assert (media / "a.en.srt").read_text(encoding="utf-8") == "kept"
     write_srt(root / "s02" / "a.retimed.tr.srt", ["R."])
     api._publish("j", "s02/a.retimed", "a.mkv")
