@@ -124,6 +124,15 @@ export default function App() {
     if (next) setSel(next.i);
   }, [visible, sel]);
 
+  const finishReview = async () => {
+    if (!window.confirm(`Finish review of ${ep}?\n\nThis deletes its subtitles, edit backup and caches from the app's output folder. The copies in the media folder are not touched. This cannot be undone.`)) return;
+    const r = await fetch(`/api/episode?ep=${encodeURIComponent(ep)}`, { method: "DELETE" });
+    if (!r.ok) { setStatus(`Could not finish review: ${(await r.json()).detail ?? r.status}`); return; }
+    const l: string[] = await (await fetch("/api/episodes")).json();
+    setEpisodes(l); setEp(l[0] ?? ""); if (!l.length) setCues([]);
+    setStatus(`Finished ${ep}`);
+  };
+
   const save = useCallback(async (andNext: boolean) => {
     if (!cue) return;
     if (draft !== cue.en) {
@@ -205,6 +214,7 @@ export default function App() {
           <div className="vfile">
             <span className="hint" title={vfile.file}>{vfile.file ? `${vfile.file.split("/").pop()}${vfile.auto ? " (auto)" : ""}` : "No video found for this episode"}</span>
             <button className="btn" onClick={() => setDialog("video")} disabled={!ep}>Change video…</button>
+            <button className="btn" onClick={() => void finishReview()} disabled={!ep}>Finish review…</button>
           </div>
           {cue ? (
             <>

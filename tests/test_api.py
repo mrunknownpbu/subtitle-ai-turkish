@@ -245,3 +245,29 @@ def test_publish_copies_only_what_the_job_wrote(root, tmp_path, monkeypatch):
     write_srt(root / "s02" / "a.retimed.tr.srt", ["R."])
     api._publish("j", "s02/a.retimed", "a.mkv")
     assert not (media / "a.retimed.tr.srt").exists()
+
+
+def test_finish_review_deletes_the_episodes_files_only(root, tmp_path, monkeypatch):
+    media = tmp_path / "media"
+    media.mkdir()
+    video = media / "a.mkv"
+    video.write_bytes(b"x")
+    (media / "a.en.srt").write_text("media copy", encoding="utf-8")
+    d = root / "s02"
+    for name in ("a.en.srt.orig", "a.video", "a.web.mp4", "a.peaks.json", ".subai/a.words.json"):
+        (d / name).parent.mkdir(exist_ok=True)
+        (d / name).write_text("x")
+    (d / ".subai" / "b.words.json").write_text("other episode")
+    monkeypatch.setattr(api, "_source", lambda ep: (video, False))
+    assert "s02/a" in api.episodes()
+    api.RETIMES["j"] = {"ep": "s02/a", "state": "running", "log": []}
+    with pytest.raises(HTTPException) as e:
+        api.finish_review("s02/a")
+    assert e.value.status_code == 409 and (d / "a.tr.srt").exists()
+    api.RETIMES["j"]["state"] = "done"
+    assert api.finish_review("s02/a")["removed"] == 7
+    assert sorted(p.name for p in d.rglob("*") if p.is_file()) == ["b.tr.srt", "b.words.json"]
+    assert (media / "a.en.srt").read_text(encoding="utf-8") == "media copy" and video.exists()
+    (root / ".backup" / "s02").mkdir(parents=True)
+    write_srt(root / ".backup/s02/z.tr.srt", ["x"]); write_srt(root / ".backup/s02/z.en.srt", ["x"])
+    assert not any(e.startswith(".backup") for e in api.episodes())

@@ -1,4 +1,5 @@
 """Local review API: list episodes, read Turkish/English cues, save an edited English cue. Serves web/dist."""
+import glob
 import json
 import os
 import re
@@ -49,7 +50,28 @@ def _pair(ep: str) -> tuple[Path, Path]:
 @app.get("/api/episodes")
 def episodes() -> list[str]:
     return sorted(str(p.relative_to(ROOT)).removesuffix(".tr.srt") for p in ROOT.rglob("*.tr.srt")
-                  if p.with_name(p.name.removesuffix(".tr.srt") + ".en.srt").is_file())
+                  if not any(part.startswith(".") for part in p.relative_to(ROOT).parts)  # backups, job history, caches
+                  and p.with_name(p.name.removesuffix(".tr.srt") + ".en.srt").is_file())
+
+
+@app.delete("/api/episode")
+def finish_review(ep: str) -> dict:
+    """Finish reviewing an episode: delete everything the app keeps for it under /output (subtitles, the pre-edit .orig copy,
+    video link, waveform and web-video caches, the cached ASR words). The media library is never touched."""
+    tr, en = _pair(ep)
+    if any(j["ep"] == ep and j["state"] in ("queued", "running") for j in RETIMES.values()):
+        raise HTTPException(409, "a job is working on this episode; wait for it to finish")
+    video, _ = _source(ep)
+    cache = tr.parent / ".subai"
+    words = glob.escape((video.stem if video else tr.name.removesuffix(".tr.srt")))
+    doomed = [tr, en, en.with_name(en.name + ".orig"), *(ROOT / f"{ep}{s}" for s in (".video", ".web.mp4", ".peaks.json")),
+              *cache.glob(f"{words}.*")]
+    removed = 0
+    for f in doomed:
+        if f.is_file() and f.resolve().is_relative_to(ROOT):
+            f.unlink()
+            removed += 1
+    return {"removed": removed}
 
 
 @app.get("/api/cues")
